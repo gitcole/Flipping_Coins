@@ -1,0 +1,85 @@
+# Default Configuration for Crypto Trading Bot
+
+# Application settings
+app:
+  name: "crypto-trading-bot"
+  version: "1.0.0"
+  debug: false
+  log_level: "INFO"
+
+# API Configuration
+api:
+  base_url: "https://api.example.com"
+  timeout: 30
+  retries: 3
+  rate_limit_per_minute: 100
+  # Connection pooling settings (automatically applied)
+  connection_pool:
+    limit: 100          # Total connection pool size
+    limit_per_host: 10  # Max connections per host
+    keepalive_timeout: 30  # Keep-alive timeout in seconds
+    ttl_dns_cache: 300     # DNS cache TTL in seconds
+  # Compression and performance settings
+  compression: true      # Enable gzip/deflate compression
+  keep_alive: true       # Enable keep-alive connections
+
+# WebSocket Configuration
+websocket:
+  ping_interval: 20
+  timeout: 10
+  max_reconnects: 5
+
+# Trading Configuration
+trading:
+  enabled: false
+  max_positions: 10
+  default_risk_per_trade: 0.02  # 2% of portfolio
+  min_order_size: 10.0
+  supported_symbols:
+    - "BTC/USDT"
+    - "ETH/USDT"
+    - "ADA/USDT"
+    - "DOT/USDT"
+
+# Risk Management
+risk:
+  max_portfolio_risk: 0.1  # 10% total portfolio at risk
+  max_correlation: 0.7
+  stop_loss_default: 0.05  # 5%
+  take_profit_default: 0.15  # 15%
+  max_drawdown: 0.2  # 20%
+
+# Database Configuration
+database:
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+    password: ""
+    decode_responses: true
+
+# Strategy Configuration
+strategies:
+  market_making:
+    enabled: true
+    spread_percentage: 0.001  # 0.1%
+    order_refresh_time: 30  # seconds
+    inventory_range: 0.1  # +/- 10% of target inventory
+
+# Logging Configuration
+logging:
+  version: 1
+  formatters:
+    json:
+      format: "%(asctime)s %(name)s %(levelname)s %(message)s"
+      datefmt: "%Y-%m-%d %H:%M:%S"
+  handlers:
+    console:
+      class: "logging.StreamHandler"
+      formatter: "json"
+      stream: "ext://sys.stdout"
+  loggers:
+    crypto_trading_bot:
+      level: "INFO"
+      handlers: ["console"]
+      propagate: false
