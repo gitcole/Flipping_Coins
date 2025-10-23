@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🤖 Robinhood Crypto Trading Bot
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -1378,3 +1379,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 This software is for educational and research purposes only. Use at your own risk. The authors are not responsible for any financial losses incurred through the use of this software.
 
 Cryptocurrency trading involves substantial risk of loss and is not suitable for every investor. Past performance does not guarantee future results.
+=======
+# Flipping_Coins
+>>>>>>> b155e17710d262be4168d2675c9da9e34864982c
