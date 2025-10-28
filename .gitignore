@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+Scripts/
+Lib/
+Include/
+pyvenv.cfg
+*.cfg
+
+# API Keys and Credentials - CRITICAL TO EXCLUDE
+*.env
+.env
+.env.local
+.env.*.local
+*_keys.txt
+*credentials*
+*secrets*
+
+# Your specific files with API keys
+# Uncomment these if you want to exclude your bot files with hardcoded keys:
+# crypto_trading_bot.py
+# crypto_trading_bot_enhanced.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Flipping_Coins subdirectory (already has its own .git)
+Flipping_Coins/.git/
