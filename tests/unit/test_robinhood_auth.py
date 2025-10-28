@@ -199,7 +199,7 @@ class TestRobinhoodSignatureAuth(UnitTestCase):
             api_key="test_key",
             public_key_b64="test_public_key"
         )
-        assert auth_prod.base_url == "https://api.robinhood.com"
+        assert auth_prod.base_url == "https://trading.robinhood.com"
 
         # Test sandbox
         auth_sandbox = RobinhoodSignatureAuth(
@@ -207,4 +207,227 @@ class TestRobinhoodSignatureAuth(UnitTestCase):
             public_key_b64="test_public_key",
             sandbox=True
         )
-        assert auth_sandbox.base_url == "https://api.robinhood.com"  # Same as production
+        assert auth_sandbox.base_url == "https://trading.robinhood.com"  # Same as production
+
+    def test_authentication_edge_cases_empty_keys(self):
+        """Test authentication with empty or whitespace-only keys."""
+        # Test with empty API key
+        with pytest.raises(AuthenticationError, match="API key is required"):
+            RobinhoodSignatureAuth(
+                api_key="",
+                public_key_b64="test_public_key"
+            )
+
+        # Test with whitespace-only API key
+        with pytest.raises(AuthenticationError, match="API key is required"):
+            RobinhoodSignatureAuth(
+                api_key="   ",
+                public_key_b64="test_public_key"
+            )
+
+    def test_authentication_edge_cases_none_values(self):
+        """Test authentication with None values."""
+        # Test with None API key
+        with pytest.raises(AuthenticationError, match="API key is required"):
+            RobinhoodSignatureAuth(
+                api_key=None,
+                public_key_b64="test_public_key"
+            )
+
+        # Test with None public key
+        with pytest.raises(AuthenticationError, match="Either private key or public key is required"):
+            RobinhoodSignatureAuth(
+                api_key="test_key",
+                public_key_b64=None
+            )
+
+    def test_authentication_key_validation_malformed_base64(self):
+        """Test authentication with malformed base64 keys."""
+        # Test with invalid base64 private key
+        with pytest.raises(AuthenticationError, match="Failed to initialize private key"):
+            RobinhoodSignatureAuth(
+                api_key="test_key",
+                private_key_b64="not_valid_base64!@#$%"
+            )
+
+        # Test with invalid base64 public key
+        with pytest.raises(AuthenticationError, match="Failed to initialize public key"):
+            RobinhoodSignatureAuth(
+                api_key="test_key",
+                public_key_b64="not_valid_base64!@#$%"
+            )
+
+    def test_authentication_key_validation_truncated_keys(self):
+        """Test authentication with truncated or incomplete keys."""
+        # Test with very short private key
+        with pytest.raises(AuthenticationError, match="Failed to initialize private key"):
+            RobinhoodSignatureAuth(
+                api_key="test_key",
+                private_key_b64="short"
+            )
+
+        # Test with very short public key
+        with pytest.raises(AuthenticationError, match="Failed to initialize public key"):
+            RobinhoodSignatureAuth(
+                api_key="test_key",
+                public_key_b64="short"
+            )
+
+    def test_authentication_state_transitions(self):
+        """Test authentication state transitions."""
+        # Start with unauthenticated state
+        auth = RobinhoodSignatureAuth.__new__(RobinhoodSignatureAuth)
+        auth._authenticated = False
+
+        # Should not be authenticated initially
+        assert auth.is_authenticated() is False
+
+        # Initialize properly
+        private_key = SigningKey.generate()
+        private_key_b64 = b64encode(private_key.to_der()).decode('utf-8')
+
+        auth.__init__(
+            api_key="test_key",
+            private_key_b64=private_key_b64
+        )
+
+        # Should now be authenticated
+        assert auth.is_authenticated() is True
+
+    def test_authentication_info_completeness(self):
+        """Test that auth info contains all expected fields."""
+        private_key = SigningKey.generate()
+        private_key_b64 = b64encode(private_key.to_der()).decode('utf-8')
+        public_key_b64 = b64encode(private_key.verifying_key.to_der()).decode('utf-8')
+
+        auth = RobinhoodSignatureAuth(
+            api_key="test_api_key",
+            private_key_b64=private_key_b64,
+            sandbox=True
+        )
+
+        auth_info = auth.get_auth_info()
+
+        # Check all required fields are present
+        required_fields = [
+            'authenticated', 'api_key_prefix', 'private_key_prefix',
+            'public_key_prefix', 'sandbox', 'auth_type', 'base_url'
+        ]
+
+        for field in required_fields:
+            assert field in auth_info, f"Missing required field: {field}"
+
+        # Check field types
+        assert isinstance(auth_info['authenticated'], bool)
+        assert isinstance(auth_info['api_key_prefix'], str)
+        assert isinstance(auth_info['sandbox'], bool)
+        assert isinstance(auth_info['auth_type'], str)
+        assert isinstance(auth_info['base_url'], str)
+
+    def test_authentication_key_derivation_consistency(self):
+        """Test that key derivation is consistent across instances."""
+        private_key = SigningKey.generate()
+        private_key_b64 = b64encode(private_key.to_der()).decode('utf-8')
+        expected_public_key_b64 = b64encode(private_key.verifying_key.to_der()).decode('utf-8')
+
+        # Create multiple auth instances with same private key
+        auth1 = RobinhoodSignatureAuth(api_key="test1", private_key_b64=private_key_b64)
+        auth2 = RobinhoodSignatureAuth(api_key="test2", private_key_b64=private_key_b64)
+
+        # Both should derive the same public key
+        assert auth1.get_public_key() == auth2.get_public_key()
+        assert auth1.get_public_key() == expected_public_key_b64
+
+    def test_authentication_error_message_quality(self):
+        """Test that error messages are informative and helpful."""
+        # Test missing API key error
+        with pytest.raises(AuthenticationError) as exc_info:
+            RobinhoodSignatureAuth()
+
+        error_msg = str(exc_info.value)
+        assert "API key" in error_msg
+        assert "required" in error_msg.lower()
+
+        # Test missing keys error
+        with pytest.raises(AuthenticationError) as exc_info:
+            RobinhoodSignatureAuth(api_key="test_key")
+
+        error_msg = str(exc_info.value)
+        assert "private key" in error_msg.lower() or "public key" in error_msg.lower()
+
+    def test_authentication_configuration_persistence(self):
+        """Test that authentication configuration persists correctly."""
+        private_key = SigningKey.generate()
+        private_key_b64 = b64encode(private_key.to_der()).decode('utf-8')
+
+        original_config = {
+            'api_key': 'persistent_test_key',
+            'private_key_b64': private_key_b64,
+            'sandbox': True
+        }
+
+        auth = RobinhoodSignatureAuth(**original_config)
+
+        # Verify initial configuration
+        assert auth.api_key == original_config['api_key']
+        assert auth.get_private_key() == original_config['private_key_b64']
+        assert auth.sandbox == original_config['sandbox']
+
+        # Verify configuration persists through auth info
+        auth_info = auth.get_auth_info()
+        assert auth_info['api_key_prefix'] == original_config['api_key']
+        assert auth_info['sandbox'] == original_config['sandbox']
+
+    def test_authentication_with_special_characters(self):
+        """Test authentication with special characters in API keys."""
+        private_key = SigningKey.generate()
+        private_key_b64 = b64encode(private_key.to_der()).decode('utf-8')
+
+        # Test with special characters in API key
+        special_api_key = "test_key_with_special_chars!@#$%^&*()"
+        auth = RobinhoodSignatureAuth(
+            api_key=special_api_key,
+            private_key_b64=private_key_b64
+        )
+
+        assert auth.is_authenticated() is True
+        assert auth.get_api_key() == special_api_key
+        assert auth.get_auth_info()['api_key_prefix'] == special_api_key
+
+    def test_authentication_key_length_validation(self):
+        """Test authentication with various key lengths."""
+        # Test with very long API key
+        long_api_key = "a" * 1000
+        private_key = SigningKey.generate()
+        private_key_b64 = b64encode(private_key.to_der()).decode('utf-8')
+
+        auth = RobinhoodSignatureAuth(
+            api_key=long_api_key,
+            private_key_b64=private_key_b64
+        )
+
+        assert auth.is_authenticated() is True
+        assert auth.get_api_key() == long_api_key
+
+    def test_authentication_multiple_initialization_attempts(self):
+        """Test multiple initialization attempts."""
+        private_key = SigningKey.generate()
+        private_key_b64 = b64encode(private_key.to_der()).decode('utf-8')
+
+        # First initialization should work
+        auth = RobinhoodSignatureAuth(
+            api_key="test_key",
+            private_key_b64=private_key_b64
+        )
+
+        assert auth.is_authenticated() is True
+
+        # Multiple initializations should not cause issues
+        # (In practice, re-initialization would create a new instance)
+        auth2 = RobinhoodSignatureAuth(
+            api_key="test_key2",
+            private_key_b64=private_key_b64
+        )
+
+        assert auth2.is_authenticated() is True
+        assert auth2.get_api_key() == "test_key2"

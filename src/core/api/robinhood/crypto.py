@@ -505,17 +505,29 @@ class RobinhoodCrypto:
             Portfolio information
 
         Note:
-            The /portfolios/crypto/ endpoint may be deprecated.
-            Consider using get_crypto_positions() for current positions instead.
+            Updated to use crypto API positions instead of deprecated /portfolios/crypto/ endpoint.
         """
+        self.logger.info("🔍 DEBUG: Getting crypto portfolio using crypto API positions")
         try:
-            response = await self.client.get("/portfolios/crypto/")
-            return response.data
+            positions = await self.get_crypto_positions()
+            total_market_value = sum(float(pos.market_value) for pos in positions)
+            total_cost_basis = sum(float(pos.cost_basis) for pos in positions)
+            total_unrealized_pl = sum(float(pos.unrealized_pl) for pos in positions)
+
+            portfolio = {
+                "equity": str(total_market_value),
+                "extended_hours_equity": str(total_market_value),  # Assuming same for crypto
+                "market_value": str(total_market_value),
+                "adjusted_equity_previous_close": "0.00",  # Not available from positions
+                "equity_previous_close": "0.00"
+            }
+            self.logger.info("🔍 DEBUG: Crypto portfolio computed from positions", total_value=total_market_value)
+            return portfolio
         except Exception as e:
             self.logger.warning(
-                "Failed to get crypto portfolio from deprecated endpoint",
+                "Failed to get crypto portfolio from positions",
                 error=str(e),
-                message="Consider using get_crypto_positions() instead"
+                message="Falling back to empty portfolio"
             )
             # Return empty portfolio structure for backward compatibility
             return {
@@ -593,8 +605,10 @@ class RobinhoodCrypto:
         Returns:
             List of crypto watchlists
         """
+        self.logger.info("🔍 DEBUG: Attempting to get crypto watchlists using main client")
         try:
             response = await self.client.get("/watchlists/crypto/")
+            self.logger.info("🔍 DEBUG: Crypto watchlists retrieved successfully", count=len(response.data.get("results", [])))
             return response.data.get("results", [])
         except Exception as e:
             self.logger.error("Failed to get crypto watchlists", error=str(e))

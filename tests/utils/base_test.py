@@ -17,7 +17,6 @@ from core.config.settings import Settings
 class BaseTestCase(ABC):
     """Abstract base class for all tests."""
 
-    @pytest.fixture(autouse=True)
     def setup_method(self):
         """Setup method that runs before each test."""
         self.start_time = time.time()
@@ -27,7 +26,7 @@ class BaseTestCase(ABC):
         """Cleanup method that runs after each test."""
         end_time = time.time()
         duration = end_time - self.start_time
-        print(f"\nTest duration: {duration".3f"}s")
+        print(f"\nTest duration: {duration:.3f}s")
 
     def assertDictContainsSubset(self, subset: Dict[str, Any],
                                dictionary: Dict[str, Any]):
@@ -289,7 +288,7 @@ class PerformanceTestMixin:
                                    max_time: float):
         """Assert that performance meets threshold."""
         assert result['average'] <= max_time, \
-            f"Average time {result['average']".4f"}s exceeds threshold {max_time".4f"}s"
+            f"Average time {result['average']:.4f}s exceeds threshold {max_time:.4f}s"
 
 
 # Convenience factory functions

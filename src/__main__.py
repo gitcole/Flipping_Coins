@@ -764,10 +764,47 @@ async def main() -> None:
             print("See README.md for configuration details.")
             sys.exit(1)
 
+    # Run comprehensive connectivity check before starting
+    print("\n🔍 Running connectivity checks...")
+    print("   This ensures your bot can connect to Robinhood API before starting")
+
+    try:
+        from .core.api.connectivity_check import comprehensive_connectivity_check, print_connectivity_status
+
+        # Run connectivity check
+        connectivity_result = await comprehensive_connectivity_check()
+
+        # Display results
+        print_connectivity_status(connectivity_result)
+
+        # Check if we should proceed
+        if not connectivity_result.is_healthy:
+            print("\n" + "="*60)
+            print("❌ CONNECTIVITY ISSUES PREVENT STARTUP")
+            print("="*60)
+            print("The trading bot cannot start safely due to connectivity issues.")
+            print("Please address the issues above and try again.")
+            print("\n💡 Quick fix suggestions:")
+            print("   • Check your internet connection")
+            print("   • Verify API credentials in config/.env")
+            print("   • Run: python verify_connection.py")
+            print("   • Check Robinhood API status")
+            sys.exit(1)
+
+        print("\n" + "="*60)
+        print("✅ CONNECTIVITY CHECK PASSED")
+        print("="*60)
+        print("All systems are ready! Starting the trading bot...")
+
+    except Exception as e:
+        print(f"❌ Error during connectivity check: {str(e)}")
+        print("   🔧 Continuing with startup anyway...")
+        print("   💡 If issues persist, run: python verify_connection.py")
+
     bot = TradingBot()
 
     try:
-        print("🚀 Starting Robinhood Crypto Trading Bot...")
+        print("\n🚀 Starting Robinhood Crypto Trading Bot...")
         print("   🌟 Welcome to automated crypto trading!")
         print("   📱 Press Ctrl+C to stop gracefully")
         print("   🎮 Use interactive commands to monitor your bot")

@@ -37,7 +37,7 @@ class RobinhoodAPIConfig(BaseModel):
     sandbox: bool = False
 
     # API settings
-    base_url: str = "https://api.robinhood.com"
+    base_url: str = "https://trading.robinhood.com"
     timeout: int = 30
     retries: int = 3
     rate_limit_per_minute: int = 100
@@ -89,14 +89,14 @@ class RobinhoodClient(BaseAPIClient):
                 settings = get_settings()
                 logger.info("RobinhoodClient: Successfully loaded settings", sandbox=sandbox)
             except Exception as e:
-                logger.warning("RobinhoodClient: Configuration not initialized, attempting auto-initialization", error=str(e))
+                logger.warning("RobinhoodClient: Configuration not initialized, attempting auto-initialization: %s", str(e))
                 try:
                     # Auto-initialize configuration if not already loaded
                     from ...config import initialize_config
                     settings = initialize_config()
                     logger.info("RobinhoodClient: Successfully auto-initialized configuration")
                 except Exception as init_error:
-                    logger.error("RobinhoodClient: Failed to auto-initialize configuration", error=str(init_error))
+                    logger.error("RobinhoodClient: Failed to auto-initialize configuration: %s", str(init_error))
                     raise ConfigurationError(
                         "Configuration not initialized and auto-initialization failed. "
                         "Please call initialize_config() before creating RobinhoodClient, "
@@ -110,7 +110,7 @@ class RobinhoodClient(BaseAPIClient):
                     api_key=rh_settings.api_key,
                     private_key=rh_settings.private_key,
                     public_key=rh_settings.public_key,
-                    sandbox=rh_settings.sandbox
+                    sandbox=bool(rh_settings.sandbox) if rh_settings.sandbox else False
                 )
             else:
                 # Create config from environment variables
@@ -118,12 +118,14 @@ class RobinhoodClient(BaseAPIClient):
                     api_key=getattr(settings, 'robinhood', None) and settings.robinhood.api_key or None,
                     private_key=getattr(settings, 'robinhood', None) and settings.robinhood.private_key or None,
                     public_key=getattr(settings, 'robinhood', None) and settings.robinhood.public_key or None,
-                    sandbox=getattr(settings, 'robinhood', None) and settings.robinhood.sandbox or False,
+                    sandbox=bool(getattr(settings, 'robinhood', None) and settings.robinhood.sandbox) if getattr(settings, 'robinhood', None) and settings.robinhood.sandbox else False,
                 )
 
         # Override sandbox setting if explicitly provided
         if sandbox is not None:
             config.sandbox = sandbox
+
+        logger.info("Base URL configured", base_url=config.base_url)
 
         # Initialize base client
         super().__init__(
@@ -142,6 +144,7 @@ class RobinhoodClient(BaseAPIClient):
             sandbox=config.sandbox
         )
         self.config = config
+        logger.debug("Authentication set up", auth_type=self.auth.get_auth_info()['auth_type'])
 
         # Initialize service modules
         self.market_data = RobinhoodMarketData(self)
@@ -176,12 +179,15 @@ class RobinhoodClient(BaseAPIClient):
             # Validate authentication
             if not self.auth.is_authenticated():
                 auth_type = "private key" if self.config.private_key else "public key"
+                logger.error("Authentication validation failed", auth_type=auth_type)
                 raise RobinhoodAPIError(f"Authentication failed - check API key and {auth_type}")
+
+            logger.debug("Authentication validated successfully")
 
             # Test connection with a simple health check
             try:
-                await self.health_check()
-                logger.info("Robinhood client initialized successfully")
+                health = await self.health_check()
+                logger.info("Robinhood client initialized successfully", health_status=health.get('status'))
             except Exception as e:
                 logger.warning(f"Health check failed during initialization: {e}")
                 # Don't fail initialization for health check issues
@@ -236,9 +242,17 @@ class RobinhoodClient(BaseAPIClient):
         """
         # Check if we're properly authenticated
         if not self.auth.is_authenticated():
+            logger.error("Request attempted without authentication", method=method, endpoint=endpoint)
             raise RobinhoodAPIError("Not authenticated with Robinhood API")
 
-        return await super().request(method, endpoint, params=params, data=data, headers=headers, **kwargs)
+        logger.debug("Making authenticated request", method=method, endpoint=endpoint, params=params)
+        try:
+            response = await super().request(method, endpoint, params=params, data=data, headers=headers, **kwargs)
+            logger.debug("Request successful", method=method, endpoint=endpoint, status=response.status if hasattr(response, 'status') else 'unknown')
+            return response
+        except Exception as e:
+            logger.error("Request failed", method=method, endpoint=endpoint, error=str(e))
+            raise
 
     # Convenience methods for common API endpoints
 
@@ -450,9 +464,11 @@ class RobinhoodClient(BaseAPIClient):
         Returns:
             Health check results
         """
+        logger.debug("Starting health check")
         try:
             # Try to get user info as a simple health check
             await self.get_user()
+            logger.debug("Health check passed")
             return {
                 "status": "healthy",
                 "authenticated": True,
@@ -460,6 +476,7 @@ class RobinhoodClient(BaseAPIClient):
                 "timestamp": time.time(),
             }
         except Exception as e:
+            logger.error("Health check failed", error=str(e))
             return {
                 "status": "unhealthy",
                 "authenticated": False,
@@ -485,7 +502,7 @@ class RobinhoodClient(BaseAPIClient):
             )
 
             # Connect to Robinhood WebSocket endpoints
-            await self._ws_client.connect("wss://api.robinhood.com/ws/")
+            await self._ws_client.connect("wss://trading.robinhood.com/ws/")
 
         return self._ws_client
 

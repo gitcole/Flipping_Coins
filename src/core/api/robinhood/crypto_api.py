@@ -166,16 +166,78 @@ class RobinhoodCryptoAPI:
         logger.info(f"🔍 DEBUG: API key set: {self.api_key is not None}")
         logger.info(f"🔍 DEBUG: Private key B64 set: {self.private_key_b64 is not None}")
 
-        # Decode private key
+        # Enhanced logging for credential validation
+        if self.api_key:
+            logger.info(f"🔍 DEBUG: API key format valid: {self.api_key.startswith('rh-')}")
+            logger.info(f"🔍 DEBUG: API key length: {len(self.api_key)}")
+        if self.private_key_b64:
+            logger.info(f"🔍 DEBUG: Private key B64 length: {len(self.private_key_b64)}")
+            logger.info(f"🔍 DEBUG: Private key B64 format appears valid: {len(self.private_key_b64) > 50}")
+
+        # Store public key if available
+        self.public_key_b64 = get_settings().robinhood.public_key
+
+        # Decode private key with enhanced error handling
         try:
-            self.private_key = SigningKey(b64decode(self.private_key_b64))
-            logger.info("🔍 DEBUG: Private key decoded successfully")
+            if self.private_key_b64:
+                self.private_key = SigningKey(b64decode(self.private_key_b64))
+                logger.info("🔍 DEBUG: Private key decoded successfully")
+                logger.info("🔍 DEBUG: Private key type: %s", type(self.private_key))
+            else:
+                self.private_key = None
         except Exception as e:
             self.private_key = None
-            logger.error("🔍 DEBUG: Failed to decode private key", error=str(e))
+            logger.error("🔍 DEBUG: Failed to decode private key: %s", str(e))
+            logger.error("🔍 DEBUG: Private key B64 starts with: %s...", self.private_key_b64[:30] if self.private_key_b64 else "None")
 
-        if not self.api_key or not self.private_key_b64:
-            logger.warning("🔍 DEBUG: No API key or private key provided for Robinhood Crypto API")
+        # Enhanced validation warnings
+        if not self.api_key:
+            logger.warning("🔍 DEBUG: No API key provided for Robinhood Crypto API")
+        if not self.private_key_b64:
+            logger.warning("🔍 DEBUG: No private key provided for Robinhood Crypto API")
+        if not self.private_key:
+            logger.warning("🔍 DEBUG: Private key could not be decoded - signature authentication will fail")
+
+        # Check for OAuth 2.0 credentials (new method)
+        oauth_client_id = getattr(get_settings().robinhood, 'client_id', None)
+        oauth_client_secret = getattr(get_settings().robinhood, 'client_secret', None)
+        oauth_api_token = getattr(get_settings().robinhood, 'api_token', None)
+
+        logger.info("🔍 DEBUG: === OAUTH 2.0 CREDENTIALS CHECK ===")
+        logger.info(f"🔍 DEBUG: OAuth Client ID set: {oauth_client_id is not None}")
+        logger.info(f"🔍 DEBUG: OAuth Client Secret set: {oauth_client_secret is not None}")
+        logger.info(f"🔍 DEBUG: OAuth API Token set: {oauth_api_token is not None}")
+
+        if oauth_client_id:
+            logger.info(f"🔍 DEBUG: OAuth Client ID length: {len(oauth_client_id)}")
+        if oauth_client_secret:
+            logger.info(f"🔍 DEBUG: OAuth Client Secret length: {len(oauth_client_secret)}")
+        if oauth_api_token:
+            logger.info(f"🔍 DEBUG: OAuth API Token length: {len(oauth_api_token)}")
+
+        # Check environment mode
+        sandbox_mode = getattr(get_settings().robinhood, 'sandbox', False)
+        logger.info(f"🔍 DEBUG: Sandbox mode: {sandbox_mode}")
+
+        # Authentication method detection
+        has_old_auth = self.api_key and self.private_key_b64 and self.private_key
+        has_oauth_auth = oauth_client_id and oauth_client_secret and oauth_api_token
+
+        logger.warning("🔍 DEBUG: === AUTHENTICATION METHOD DETECTION ===")
+        logger.warning(f"🔍 DEBUG: Old private key auth available: {has_old_auth}")
+        logger.warning(f"🔍 DEBUG: OAuth 2.0 auth available: {has_oauth_auth}")
+
+        if not has_old_auth and not has_oauth_auth:
+            logger.error("🔍 DEBUG: NO VALID AUTHENTICATION METHOD FOUND!")
+            logger.error("🔍 DEBUG: This indicates missing or invalid credentials")
+        elif has_old_auth and has_oauth_auth:
+            logger.warning("🔍 DEBUG: BOTH authentication methods available - using private key method")
+        elif has_oauth_auth:
+            logger.info("🔍 DEBUG: OAuth 2.0 authentication method available")
+        else:
+            logger.error("🔍 DEBUG: Only deprecated private key method available")
+            logger.error("🔍 DEBUG: According to documentation, private key auth is deprecated")
+            logger.error("🔍 DEBUG: Please configure OAuth 2.0 credentials for institutional access")
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -287,44 +349,143 @@ class RobinhoodCryptoAPI:
         self._request_count += 1
         self._last_request_time = time.time()
 
-        logger.debug(
-            "Making API request",
-            request_id=request_id,
-            method=method,
-            url=url,
-            rate_limit_wait=wait_time,
-            request_count=self._request_count
+        logger.info(
+            "🔍 DEBUG: Making API request - ID: %s, Method: %s, URL: %s, Endpoint: %s, Base URL: %s, Wait: %s, Count: %s",
+            request_id, method, url, endpoint, self.base_url, wait_time, self._request_count
         )
 
         last_error = None
         for attempt in range(self.max_retries + 1):
             try:
-                # Prepare body for signing
-                body = json.dumps(data) if data else ""
+                # Prepare body for signing - use compact JSON format
+                body = json.dumps(data, separators=(',', ':')) if data else ""
 
-                # Generate signature
-                timestamp = int(datetime.datetime.now(tz=datetime.timezone.utc).timestamp())
-                message = f"{self.api_key}{timestamp}{url}{method}{body}"
-                logger.info(f"🔍 DEBUG: Generating signature, message: {message[:50]}...")
-                if not self.private_key:
-                    logger.error("🔍 DEBUG: Private key is None, cannot sign request")
-                    raise RobinhoodAPIError("Private key not available for signing")
-                signature = self.private_key.sign(message.encode('utf-8'))
-                signature_b64 = b64encode(signature.signature).decode('utf-8')
-                logger.info(f"🔍 DEBUG: Signature generated successfully")
+                # Check if we have valid authentication credentials
+                oauth_client_id = getattr(get_settings().robinhood, 'client_id', None)
+                oauth_client_secret = getattr(get_settings().robinhood, 'client_secret', None)
+                oauth_api_token = getattr(get_settings().robinhood, 'api_token', None)
 
+                has_oauth = oauth_client_id and oauth_client_secret and oauth_api_token
+                has_private_key = self.api_key and self.private_key_b64 and self.private_key
+                has_public_key = self.api_key and self.public_key_b64 is not None
+
+                # Check authentication method availability
+                if not has_oauth and not has_private_key and not has_public_key:
+                    logger.error("🔍 DEBUG: No valid authentication credentials found")
+                    logger.error("🔍 DEBUG: OAuth 2.0 available: %s", has_oauth)
+                    logger.error("🔍 DEBUG: Private key available: %s", has_private_key)
+                    logger.error("🔍 DEBUG: Public key available: %s", has_public_key)
+                    logger.error("🔍 DEBUG: Please configure authentication credentials in .env file")
+                    logger.error("🔍 DEBUG: Required: ROBINHOOD_API_TOKEN, ROBINHOOD_CLIENT_ID, ROBINHOOD_CLIENT_SECRET")
+                    logger.error("🔍 DEBUG: Or legacy: ROBINHOOD_API_KEY and ROBINHOOD_PRIVATE_KEY")
+                    logger.error("🔍 DEBUG: Or public key: ROBINHOOD_API_KEY and ROBINHOOD_PUBLIC_KEY")
+                    raise RobinhoodAPIError("No authentication credentials configured")
+
+                # Choose authentication method (OAuth 2.0 preferred)
+                logger.info(f"🔍 DEBUG: Authentication method selection - OAuth: {has_oauth}, Private: {has_private_key}, Public: {has_public_key}")
+
+                if has_oauth:
+                    logger.info("🔍 DEBUG: Using OAuth 2.0 authentication")
+                    # TODO: Implement OAuth 2.0 authentication flow
+                    # For now, use API token as bearer token
+                    auth_method = "oauth"
+                    auth_token = oauth_api_token
+                elif has_private_key:
+                    logger.warning("🔍 DEBUG: Using deprecated private key authentication")
+                    auth_method = "private_key"
+                elif has_public_key:
+                    logger.info("🔍 DEBUG: Using public key authentication")
+                    auth_method = "public_key"
+                else:
+                    logger.error(f"🔍 DEBUG: No valid auth method - OAuth: {has_oauth}, Private: {has_private_key}, Public: {has_public_key}")
+                    raise RobinhoodAPIError("No valid authentication method available")
+
+                # Generate signature for private key method
+                if auth_method == "private_key":
+                    timestamp = int(datetime.datetime.now(tz=datetime.timezone.utc).timestamp())
+                    # Updated signature format: api_key + timestamp + path + method + body (JSON)
+                    message = f"{self.api_key}{timestamp}{endpoint}{method}{body}"
+
+                    # Enhanced signature logging
+                    logger.info(f"🔍 DEBUG: === SIGNATURE GENERATION ===")
+                    logger.info(f"🔍 DEBUG: Timestamp: {timestamp}")
+                    logger.info(f"🔍 DEBUG: Endpoint: {endpoint}")
+                    logger.info(f"🔍 DEBUG: Method: {method}")
+                    logger.info(f"🔍 DEBUG: Body length: {len(body)}")
+                    logger.info(f"🔍 DEBUG: API key length: {len(self.api_key)}")
+                    logger.info(f"🔍 DEBUG: Message length: {len(message)}")
+                    logger.info(f"🔍 DEBUG: Message preview: {message[:100]}...")
+                    logger.info(f"🔍 DEBUG: Body preview: {body[:100] if body else 'empty'}")
+
+                    logger.info(f"🔍 DEBUG: Private key available for signing: {type(self.private_key)}")
+
+                    try:
+                        signature = self.private_key.sign(message.encode('utf-8'))
+                        signature_b64 = b64encode(signature.signature).decode('utf-8')
+                        logger.info(f"🔍 DEBUG: Signature generated successfully")
+                        logger.info(f"🔍 DEBUG: Signature length: {len(signature_b64)}")
+                        logger.info(f"🔍 DEBUG: Signature preview: {signature_b64[:50]}...")
+                    except Exception as e:
+                        logger.error(f"🔍 DEBUG: Failed to generate signature: {e}")
+                        logger.error(f"🔍 DEBUG: Message encoding issue: {message.encode('utf-8')}")
+                        raise RobinhoodAPIError(f"Signature generation failed: {e}")
+
+                    # Set headers based on authentication method
+                    if auth_method == "private_key":
+                        headers = {
+                            "x-api-key": self.api_key,
+                            "x-signature": signature_b64,
+                            "x-timestamp": str(timestamp),
+                            "Accept": "application/json",
+                            "Content-Type": "application/json",
+                        }
+                    elif auth_method == "oauth":
+                        logger.info("🔍 DEBUG: Using OAuth 2.0 Bearer token authentication")
+                        headers = {
+                            "Authorization": f"Bearer {auth_token}",
+                            "Accept": "application/json",
+                            "Content-Type": "application/json",
+                        }
+                    elif auth_method == "public_key":
+                        headers = {
+                            "x-api-key": self.api_key,
+                            "Accept": "application/json",
+                            "Content-Type": "application/json",
+                        }
+
+                logger.info(f"🔍 DEBUG: Private key available for signing: {type(self.private_key)}")
+
+                try:
+                    signature = self.private_key.sign(message.encode('utf-8'))
+                    signature_b64 = b64encode(signature.signature).decode('utf-8')
+                    logger.info(f"🔍 DEBUG: Signature generated successfully")
+                    logger.info(f"🔍 DEBUG: Signature length: {len(signature_b64)}")
+                    logger.info(f"🔍 DEBUG: Signature preview: {signature_b64[:50]}...")
+                except Exception as e:
+                    logger.error(f"🔍 DEBUG: Failed to generate signature: {e}")
+                    logger.error(f"🔍 DEBUG: Message encoding issue: {message.encode('utf-8')}")
+                    raise RobinhoodAPIError(f"Signature generation failed: {e}")
+
+                # Enhanced header logging for debugging
+                logger.info(f"🔍 DEBUG: === REQUEST HEADERS ===")
+                if auth_method == "private_key":
+                    logger.info(f"🔍 DEBUG: x-api-key: {self.api_key[:20]}...")
+                    logger.info(f"🔍 DEBUG: x-signature: {signature_b64[:50]}...")
+                    logger.info(f"🔍 DEBUG: x-timestamp: {timestamp}")
+                elif auth_method == "oauth":
+                    logger.info(f"🔍 DEBUG: Authorization: Bearer {auth_token[:20]}...")
+                elif auth_method == "public_key":
+                    logger.info(f"🔍 DEBUG: x-api-key: {self.api_key[:20]}...")
+                    logger.info(f"🔍 DEBUG: Public key authentication (no signature required)")
+                logger.info(f"🔍 DEBUG: Full URL: {url}")
+                logger.info(f"🔍 DEBUG: Method: {method}")
+                logger.info(f"🔍 DEBUG: Request ID: {request_id}")
                 async with self._session.request(
                     method=method,
                     url=url,
                     json=data,
                     params=params,
-                    headers={
-                        "x-api-key": self.api_key,
-                        "x-signature": signature_b64,
-                        "x-timestamp": str(timestamp),
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                    }
+                    headers=headers
                 ) as response:
                     response_data = None
 
@@ -336,15 +497,29 @@ class RobinhoodCryptoAPI:
 
                     # Handle HTTP errors
                     if response.status >= 400:
+                        # Enhanced error logging for authentication issues
+                        logger.error(f"🔍 DEBUG: === HTTP ERROR RESPONSE ===")
+                        logger.error(f"🔍 DEBUG: Status code: {response.status}")
+                        logger.error(f"🔍 DEBUG: Response headers: {dict(response.headers)}")
+                        logger.error(f"🔍 DEBUG: Response data: {response_data}")
+                        logger.error(f"🔍 DEBUG: Request ID: {request_id}")
+                        logger.error(f"🔍 DEBUG: Attempt: {attempt + 1}")
+
+                        # Check for common authentication errors
+                        if response.status == 401:
+                            logger.error("🔍 DEBUG: 401 Unauthorized - Authentication failed")
+                            logger.error("🔍 DEBUG: This indicates signature verification or credential issues")
+                        elif response.status == 403:
+                            logger.error("🔍 DEBUG: 403 Forbidden - Access denied")
+                            logger.error("🔍 DEBUG: This may indicate account or permission issues")
+
                         error = handle_http_error(response, response_data)
                         if isinstance(error, APIRateLimitError) and retry_on_rate_limit and attempt < self.max_retries:
                             # Wait for rate limit reset and retry
                             retry_delay = getattr(error, 'retry_after', 60) or 60
                             logger.warning(
-                                "Rate limited, retrying after delay",
-                                request_id=request_id,
-                                attempt=attempt + 1,
-                                retry_delay=retry_delay
+                                "Rate limited, retrying after delay - ID: %s, Attempt: %s, Delay: %s",
+                                request_id, attempt + 1, retry_delay
                             )
                             await asyncio.sleep(retry_delay)
                             continue
@@ -353,10 +528,8 @@ class RobinhoodCryptoAPI:
                             raise error
 
                     logger.debug(
-                        "API request successful",
-                        request_id=request_id,
-                        status=response.status,
-                        response_size=len(str(response_data))
+                        "API request successful - ID: %s, Status: %s, Response size: %s",
+                        request_id, response.status, len(str(response_data))
                     )
 
                     return response_data
@@ -395,16 +568,19 @@ class RobinhoodCryptoAPI:
         Raises:
             RobinhoodAPIError: If account retrieval fails
         """
+        logger.info("🔍 DEBUG: Retrieving crypto account using endpoint /api/v1/crypto/trading/accounts/")
         try:
             data = await self._make_request("GET", "/api/v1/crypto/trading/accounts/")
             if not data or "results" not in data or not data["results"]:
+                logger.error("🔍 DEBUG: No crypto account found in response", response_data=data)
                 raise RobinhoodAPIError("No crypto account found")
 
             account_data = data["results"][0]
+            logger.info("🔍 DEBUG: Crypto account retrieved successfully", account_id=account_data.get("id"))
             return CryptoAccount(**account_data)
 
         except Exception as e:
-            logger.error("Failed to get crypto account", error=str(e))
+            logger.error("Failed to get crypto account: %s", str(e))
             raise RobinhoodAPIError(f"Failed to get crypto account: {e}")
 
     async def get_positions(self, asset_codes: Optional[List[str]] = None) -> List[CryptoPosition]:
@@ -433,7 +609,7 @@ class RobinhoodCryptoAPI:
             return positions
 
         except Exception as e:
-            logger.error("Failed to get crypto positions", error=str(e))
+            logger.error("Failed to get crypto positions: %s", str(e))
             raise RobinhoodAPIError(f"Failed to get crypto positions: {e}")
 
     # Market Data Methods
@@ -466,7 +642,7 @@ class RobinhoodCryptoAPI:
             return quotes
 
         except Exception as e:
-            logger.error("Failed to get crypto quotes", symbols=symbols, error=str(e))
+            logger.error("Failed to get crypto quotes for symbols %s: %s", symbols, str(e))
             raise CryptoMarketDataError(f"Failed to get crypto quotes: {e}", symbols=symbols)
 
     async def get_quote(self, symbol: str) -> CryptoQuote:
@@ -516,11 +692,8 @@ class RobinhoodCryptoAPI:
 
         except Exception as e:
             logger.error(
-                "Failed to get estimated price",
-                symbol=symbol,
-                side=side,
-                quantity=quantity,
-                error=str(e)
+                "Failed to get estimated price for symbol %s, side %s, quantity %s: %s",
+                symbol, side, quantity, str(e)
             )
             raise RobinhoodAPIError(f"Failed to get estimated price: {e}")
 
@@ -610,7 +783,7 @@ class RobinhoodCryptoAPI:
             return data.get("results", [])
 
         except Exception as e:
-            logger.error("Failed to get crypto orders", symbol=symbol, error=str(e))
+            logger.error("Failed to get crypto orders for symbol %s: %s", symbol, str(e))
             raise RobinhoodAPIError(f"Failed to get crypto orders: {e}")
 
     async def get_order(self, order_id: str) -> Dict[str, Any]:
@@ -629,7 +802,7 @@ class RobinhoodCryptoAPI:
             return await self._make_request("GET", f"/api/v1/crypto/trading/orders/{order_id}/")
 
         except Exception as e:
-            logger.error("Failed to get crypto order", order_id=order_id, error=str(e))
+            logger.error("Failed to get crypto order %s: %s", order_id, str(e))
             raise RobinhoodAPIError(f"Failed to get order {order_id}: {e}")
 
     async def cancel_order(self, order_id: str) -> Dict[str, Any]:
@@ -655,7 +828,7 @@ class RobinhoodCryptoAPI:
             return data
 
         except Exception as e:
-            logger.error("Failed to cancel crypto order", order_id=order_id, error=str(e))
+            logger.error("Failed to cancel crypto order %s: %s", order_id, str(e))
             raise RobinhoodAPIError(f"Failed to cancel order {order_id}: {e}")
 
     # Convenience Methods

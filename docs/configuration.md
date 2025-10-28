@@ -506,7 +506,7 @@ monitoring:
     timeout: 10                   # 10 second timeout
     endpoints:
       - name: "API Connectivity"
-        url: "https://api.robinhood.com/health"
+        url: "https://trading.robinhood.com/health"
         expected_status: 200
       - name: "Database Connectivity"
         type: "redis"
@@ -647,7 +647,7 @@ REDIS_URL=redis://redis:6379/0
 DATABASE_URL=sqlite:///data/trading_bot.db
 
 # API settings for container
-API_BASE_URL=https://api.robinhood.com
+API_BASE_URL=https://trading.robinhood.com
 PROMETHEUS_ENABLED=true
 GRAFANA_ENABLED=true
 ```

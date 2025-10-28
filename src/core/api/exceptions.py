@@ -607,3 +607,5 @@ class APIErrorHandler:
 
 # Aliases for backward compatibility
 AuthenticationError = APIAuthenticationError
+RateLimitError = APIRateLimitError
+NetworkError = APIConnectionError

@@ -627,3 +627,217 @@ class MockApiClientBuilder:
             mock.set_error_mode(True, self.config["error_rate"])
 
         return mock
+
+
+class EnhancedApiMock(RobinhoodApiMock):
+    """Enhanced API mock with additional error scenarios and edge cases."""
+
+    def __init__(self):
+        super().__init__()
+        self._error_patterns = {}
+        self._network_conditions = {}
+        self._rate_limit_history = []
+        self._response_delays = {}
+
+    def set_error_pattern(self, endpoint_pattern: str, error_type: str, frequency: float = 0.5):
+        """Set specific error patterns for different endpoints."""
+        self._error_patterns[endpoint_pattern] = {
+            'error_type': error_type,
+            'frequency': frequency
+        }
+
+    def set_network_condition(self, condition: str, duration: float = 60.0):
+        """Set network conditions like latency, packet loss, etc."""
+        self._network_conditions[condition] = {
+            'start_time': time.time(),
+            'duration': duration,
+            'active': True
+        }
+
+    def set_variable_response_delay(self, endpoint: str, delay_range: tuple = (0.1, 2.0)):
+        """Set variable response delays for specific endpoints."""
+        self._response_delays[endpoint] = delay_range
+
+    async def _simulate_enhanced_delay(self, seconds: float):
+        """Enhanced delay simulation with network conditions."""
+        # Check for active network conditions
+        current_time = time.time()
+        active_conditions = []
+
+        for condition, config in self._network_conditions.items():
+            if (config['active'] and
+                current_time >= config['start_time'] and
+                current_time <= config['start_time'] + config['duration']):
+                active_conditions.append(condition)
+
+        # Apply network condition effects
+        for condition in active_conditions:
+            if condition == 'high_latency':
+                seconds += 1.0  # Add 1 second latency
+            elif condition == 'packet_loss':
+                if time.time() % 3 < 1:  # 33% packet loss
+                    raise Exception("Simulated packet loss")
+
+        # Apply variable delays
+        if hasattr(self, '_current_endpoint') and self._current_endpoint in self._response_delays:
+            min_delay, max_delay = self._response_delays[self._current_endpoint]
+            import random
+            seconds = random.uniform(min_delay, max_delay)
+
+        await self._simulate_delay(seconds)
+
+    def should_error_for_endpoint(self, endpoint: str) -> bool:
+        """Check if an endpoint should return an error based on patterns."""
+        for pattern, config in self._error_patterns.items():
+            if pattern in endpoint:
+                import random
+                return random.random() < config['frequency']
+
+        return False
+
+    def get_error_for_endpoint(self, endpoint: str) -> Optional[str]:
+        """Get the error type for a specific endpoint."""
+        for pattern, config in self._error_patterns.items():
+            if pattern in endpoint:
+                return config['error_type']
+        return None
+
+    async def simulate_rate_limit_exceeded(self):
+        """Simulate rate limit exceeded scenario."""
+        from src.core.api.exceptions import RateLimitError
+
+        self._rate_limit_history.append({
+            'timestamp': time.time(),
+            'event': 'rate_limit_exceeded'
+        })
+
+        raise RateLimitError("Rate limit exceeded", retry_after=60)
+
+    async def simulate_network_timeout(self):
+        """Simulate network timeout."""
+        await asyncio.sleep(0.1)  # Brief delay then timeout
+        raise asyncio.TimeoutError("Network request timed out")
+
+    async def simulate_malformed_response(self):
+        """Simulate malformed JSON response."""
+        return "invalid json response {"
+
+    async def simulate_empty_response(self):
+        """Simulate empty response."""
+        return ""
+
+    async def simulate_large_response(self, size_mb: float = 1.0):
+        """Simulate large response."""
+        large_data = "x" * int(size_mb * 1024 * 1024)  # Create large string
+        return {"data": large_data}
+
+    def get_rate_limit_history(self) -> List[Dict[str, Any]]:
+        """Get rate limit event history."""
+        return self._rate_limit_history.copy()
+
+    def clear_error_patterns(self):
+        """Clear all error patterns."""
+        self._error_patterns.clear()
+
+    def clear_network_conditions(self):
+        """Clear all network conditions."""
+        self._network_conditions.clear()
+
+
+class MockScenarioBuilder:
+    """Builder for creating complex mock scenarios."""
+
+    def __init__(self):
+        self.mock = EnhancedApiMock()
+        self.scenario_steps = []
+        self.current_step = 0
+
+    def add_step(self, step_type: str, **kwargs):
+        """Add a step to the scenario."""
+        self.scenario_steps.append({
+            'type': step_type,
+            'config': kwargs
+        })
+        return self
+
+    def add_delay_step(self, delay: float):
+        """Add a delay step."""
+        return self.add_step('delay', seconds=delay)
+
+    def add_error_step(self, error_type: str, endpoint_pattern: str = "*"):
+        """Add an error step."""
+        return self.add_step('error', error_type=error_type, pattern=endpoint_pattern)
+
+    def add_rate_limit_step(self, request_count: int = 10):
+        """Add a rate limit step."""
+        return self.add_step('rate_limit', request_count=request_count)
+
+    def add_network_condition_step(self, condition: str, duration: float = 5.0):
+        """Add a network condition step."""
+        return self.add_step('network_condition', condition=condition, duration=duration)
+
+    def add_response_step(self, endpoint: str, response: Any):
+        """Add a custom response step."""
+        return self.add_step('response', endpoint=endpoint, response=response)
+
+    def build_scenario(self) -> 'ScenarioMock':
+        """Build the scenario mock."""
+        return ScenarioMock(self.mock, self.scenario_steps)
+
+
+class ScenarioMock:
+    """Mock that executes predefined scenarios."""
+
+    def __init__(self, base_mock: EnhancedApiMock, steps: List[Dict[str, Any]]):
+        self.base_mock = base_mock
+        self.steps = steps
+        self.current_step = 0
+        self.request_count = 0
+
+    async def execute_request(self, method: str, endpoint: str, **kwargs):
+        """Execute a request according to the current scenario step."""
+        self.request_count += 1
+
+        # Find matching step
+        current_step = None
+        for step in self.steps:
+            if step['type'] == 'response' and step['config']['endpoint'] in endpoint:
+                current_step = step
+                break
+            elif step['type'] != 'response':  # Non-response steps apply to all requests
+                current_step = step
+                break
+
+        if current_step:
+            step_type = current_step['type']
+            step_config = current_step['config']
+
+            if step_type == 'delay':
+                await self.base_mock._simulate_delay(step_config['seconds'])
+            elif step_type == 'error':
+                if step_config.get('pattern', '*') in endpoint:
+                    error_type = step_config['error_type']
+                    if error_type == 'timeout':
+                        raise asyncio.TimeoutError("Simulated timeout")
+                    elif error_type == 'network':
+                        raise Exception("Simulated network error")
+                    elif error_type == 'auth':
+                        from src.core.api.exceptions import AuthenticationError
+                        raise AuthenticationError("Simulated auth error")
+            elif step_type == 'rate_limit':
+                if self.request_count >= step_config['request_count']:
+                    await self.base_mock.simulate_rate_limit_exceeded()
+            elif step_type == 'network_condition':
+                # Apply network condition if active
+                pass
+            elif step_type == 'response':
+                return step_config['response']
+
+        # Default behavior - delegate to base mock
+        return await self.base_mock._simulate_request(method, endpoint, **kwargs)
+
+    async def _simulate_request(self, method: str, endpoint: str, **kwargs):
+        """Simulate a request (placeholder for actual implementation)."""
+        # This would be implemented to delegate to the appropriate mock method
+        # For now, return a generic response
+        return {"data": "mock_response", "endpoint": endpoint, "method": method}

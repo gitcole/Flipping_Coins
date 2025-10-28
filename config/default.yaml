@@ -9,7 +9,7 @@ app:
 
 # API Configuration
 api:
-  base_url: "https://api.example.com"
+  base_url: "https://trading.robinhood.com"
   timeout: 30
   retries: 3
   rate_limit_per_minute: 100

@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
+import structlog
 import yaml
 from dotenv import load_dotenv
 
@@ -196,7 +197,10 @@ class ConfigurationManager:
         Returns:
             Dictionary of environment variables with proper type conversion.
         """
+        logger = structlog.get_logger(__name__)
         config = {}
+
+        logger.debug("Loading configuration from environment variables")
 
         # Map environment variables to configuration keys
         env_mapping = {
@@ -262,6 +266,15 @@ class ConfigurationManager:
                 keys = config_path.split('.')
                 set_nested_value(config, keys, value)
 
+        # Log what was loaded (without sensitive values)
+        safe_config = {}
+        for key, value in config.items():
+            if 'key' in key.lower() or 'secret' in key.lower() or 'password' in key.lower():
+                safe_config[key] = "***"
+            else:
+                safe_config[key] = value
+
+        logger.debug("Configuration loaded from environment", config=safe_config)
         return config
 
     def get_settings(self) -> Settings:
@@ -456,7 +469,10 @@ def initialize_config(
     Returns:
         Settings object with loaded configuration
     """
+    logger = structlog.get_logger(__name__)
     manager = get_config_manager()
+
+    logger.info("Initializing configuration", config_paths=config_paths, env_files=env_files)
 
     # Add default configuration paths
     if config_paths:
@@ -470,12 +486,15 @@ def initialize_config(
             Path("config/.env"),
         ]
 
+        logger.debug("Checking default config paths", paths=[str(p) for p in default_paths])
         for path in default_paths:
             if path.exists():
                 if path.suffix == '.yaml':
                     manager.add_config_path(path)
+                    logger.debug("Added config path", path=str(path))
                 else:
                     manager.add_env_file(str(path))
+                    logger.debug("Added env file", path=str(path))
 
     # Add default env files
     if env_files:
@@ -488,15 +507,30 @@ def initialize_config(
             "config/.env",
         ]
 
+        logger.debug("Checking default env files", files=default_env_files)
         for env_file in default_env_files:
             if Path(env_file).exists():
                 manager.add_env_file(env_file)
+                logger.debug("Added env file", path=env_file)
+
+    logger.debug("Environment files to load", files=manager._env_files)
 
     # Load environment files into os.environ
     for env_file in manager._env_files:
         if Path(env_file).exists():
-            load_dotenv(env_file)
+            logger.info("Loading environment file", path=env_file)
+            load_dotenv(env_file, override=True)
 
+            # Log which environment variables were loaded (without sensitive values)
+            env_vars_loaded = []
+            for key in ['ROBINHOOD_API_KEY', 'ROBINHOOD_PRIVATE_KEY', 'ROBINHOOD_PUBLIC_KEY', 'ROBINHOOD_SANDBOX']:
+                if os.getenv(key):
+                    env_vars_loaded.append(key)
+            logger.debug("Environment variables loaded", variables=env_vars_loaded)
+        else:
+            logger.warning("Environment file not found", path=env_file)
+
+    logger.info("Loading configuration from all sources")
     return manager.load_configuration()
 
 
