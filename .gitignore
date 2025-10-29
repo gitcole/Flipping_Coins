@@ -139,10 +139,32 @@ log/
 
 # IDEs
 .vscode/settings.json
+.vscode/
 .idea/
 *.swp
 *.swo
 *~
+
+# Virtual Environment
+Scripts/
+Lib/
+Include/
+pyvenv.cfg
+*.cfg
+
+# API Keys and Credentials - CRITICAL TO EXCLUDE
+*.env
+.env
+.env.local
+.env.*.local
+*_keys.txt
+*credentials*
+*secrets*
+
+# Your specific files with API keys
+# Uncomment these if you want to exclude your bot files with hardcoded keys:
+# crypto_trading_bot.py
+# crypto_trading_bot_enhanced.py
 
 # OS
 .DS_Store
@@ -152,6 +174,7 @@ log/
 .Trashes
 ehthumbs.db
 Thumbs.db
+desktop.ini
 
 # Temporary files
 tmp/
@@ -271,3 +294,6 @@ trading_pairs.json
 strategy_config.json
 backtest_*.json
 performance_*.json
+
+# Flipping_Coins subdirectory (already has its own .git)
+Flipping_Coins/.git/
