@@ -10,8 +10,8 @@ from unittest.mock import Mock, AsyncMock, patch
 from decimal import Decimal
 from datetime import datetime, timedelta
 
-from strategies.market_making.market_maker import MarketMaker, MarketMakerConfig, OrderBookSnapshot, InventoryState
-from strategies.base.strategy import BaseStrategy, StrategyConfig, SignalDirection, TradingSignal
+from src.strategies.market_making.market_maker import MarketMaker, MarketMakerConfig, OrderBookSnapshot, InventoryState
+from src.strategies.base.strategy import BaseStrategy, StrategyConfig, SignalDirection, TradingSignal
 from core.config.manager import ConfigManager
 from tests.utils.base_test import UnitTestCase
 

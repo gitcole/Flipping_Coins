@@ -194,7 +194,6 @@ pytest tests/ --cov=src --cov-report=term-missing
 - `@pytest.mark.network` - Network tests
 - `@pytest.mark.auth` - Authentication tests
 - `@pytest.mark.error` - Error handling tests
-- `@pytest.mark.mock` - Mock-based tests
 
 #### Filtering Examples
 ```bash

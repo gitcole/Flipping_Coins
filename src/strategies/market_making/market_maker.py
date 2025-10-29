@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from ..base import BaseStrategy, StrategyConfig, TradingSignal, SignalDirection
 from ....utils.logging import get_logger
@@ -88,7 +88,8 @@ class MarketMakerConfig(StrategyConfig):
     max_quotes_per_symbol: int = Field(10, description="Maximum concurrent quotes per symbol")
     order_book_depth: int = Field(10, description="Order book depth to analyze")
 
-    @validator('base_spread_percentage', 'min_spread_percentage', 'max_spread_percentage')
+    @field_validator('base_spread_percentage', 'min_spread_percentage', 'max_spread_percentage')
+    @classmethod
     def validate_spreads(cls, v):
         if v <= 0:
             raise ValueError("Spread percentages must be positive")

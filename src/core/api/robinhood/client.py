@@ -395,6 +395,8 @@ class RobinhoodClient(BaseAPIClient):
         Returns:
             User data
         """
+        # Note: This endpoint may not be available in crypto API
+        # For crypto operations, use crypto-specific endpoints instead
         response = await self.get("/user/")
         return response.data
 
@@ -466,15 +468,27 @@ class RobinhoodClient(BaseAPIClient):
         """
         logger.debug("Starting health check")
         try:
-            # Try to get user info as a simple health check
-            await self.get_user()
-            logger.debug("Health check passed")
-            return {
-                "status": "healthy",
-                "authenticated": True,
-                "sandbox": self.is_sandbox(),
-                "timestamp": time.time(),
-            }
+            # Use crypto price endpoints for health check (more reliable for crypto API)
+            if self.crypto_api:
+                # Try to get estimated price for a small BTC-USD bid order to verify API connectivity
+                await self.crypto_api.get_estimated_price("BTC-USD", "bid", "1")
+                logger.debug("Health check passed")
+                return {
+                    "status": "healthy",
+                    "authenticated": True,
+                    "sandbox": self.is_sandbox(),
+                    "timestamp": time.time(),
+                }
+            else:
+                # Fallback to user endpoint if crypto API not available
+                await self.get_user()
+                logger.debug("Health check passed")
+                return {
+                    "status": "healthy",
+                    "authenticated": True,
+                    "sandbox": self.is_sandbox(),
+                    "timestamp": time.time(),
+                }
         except Exception as e:
             logger.error("Health check failed", error=str(e))
             return {

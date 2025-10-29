@@ -274,6 +274,29 @@ def mock_rate_limit():
     return rate_limit_side_effect
 
 
+# ===== DEBUG TEST FIXTURES =====
+
+@pytest.fixture
+def debug_suite():
+    """Provide a debug test suite for comprehensive debugging tests."""
+    from tests.debug.test_api_connectivity import APIConnectivityTestSuite
+    return APIConnectivityTestSuite()
+
+
+@pytest.fixture
+def connectivity_suite():
+    """Provide a connectivity test suite for network connectivity testing."""
+    from tests.debug.test_api_connectivity import APIConnectivityTestSuite
+    return APIConnectivityTestSuite()
+
+
+@pytest.fixture
+def auth_suite():
+    """Provide an authentication test suite for auth-related testing."""
+    from tests.debug.test_api_connectivity import APIConnectivityTestSuite
+    return APIConnectivityTestSuite()
+
+
 # ===== TEST DATA FIXTURES =====
 
 @pytest.fixture

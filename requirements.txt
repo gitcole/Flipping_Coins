@@ -27,3 +27,6 @@ flake8>=6.0.0
 
 # Additional utilities
 python-json-logger>=2.0.0
+
+# Security and monitoring
+psutil>=5.9.0

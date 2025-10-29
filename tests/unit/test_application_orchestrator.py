@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, Mock, MagicMock, patch
 from typing import Dict, Any
 
 from tests.utils.base_test import UnitTestCase
-from core.application.orchestrator import ApplicationOrchestrator
-from core.config.settings import Settings
+from src.core.app.orchestrator import ApplicationOrchestrator
+from src.core.config.settings import Settings
 
 
 class TestApplicationOrchestrator(UnitTestCase):
@@ -29,7 +29,7 @@ class TestApplicationOrchestrator(UnitTestCase):
             }
         }
 
-        self.orchestrator = ApplicationOrchestrator(self.settings)
+        self.orchestrator = ApplicationOrchestrator()
         self.orchestrator.components = {}
         self.orchestrator.health_metrics = {}
         self.orchestrator.risk_metrics = {}

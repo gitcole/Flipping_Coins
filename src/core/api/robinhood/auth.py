@@ -41,11 +41,12 @@ Example:
 """
 
 import os
+import time
 from typing import Dict, Optional
 
 import structlog
 from ecdsa import SigningKey
-from base64 import b64decode
+from base64 import b64decode, b64encode
 
 from ..exceptions import AuthenticationError
 
@@ -115,25 +116,17 @@ class RobinhoodSignatureAuth:
             - Private keys are used for request signing (more secure)
             - Public keys are used for direct authentication (simplified)
         """
-        # Load credentials from parameters or environment variables
-        self.api_key = api_key or os.getenv("ROBINHOOD_API_KEY")
-        self.private_key_b64 = private_key_b64 or os.getenv("ROBINHOOD_PRIVATE_KEY")
+        # Load credentials from parameters or environment variables (support both naming conventions)
+        self.api_key = api_key or os.getenv("ROBINHOOD_API_KEY") or os.getenv("RH_API_KEY")
+        self.private_key_b64 = private_key_b64 or os.getenv("ROBINHOOD_PRIVATE_KEY") or os.getenv("RH_BASE64_PRIVATE_KEY")
         self.public_key_b64 = public_key_b64 or os.getenv("ROBINHOOD_PUBLIC_KEY")
         self.sandbox = sandbox
-
-        # Check for OAuth 2.0 credentials (preferred method)
-        self.oauth_api_token = os.getenv("ROBINHOOD_API_TOKEN")
-        self.oauth_client_id = os.getenv("ROBINHOOD_CLIENT_ID")
-        self.oauth_client_secret = os.getenv("ROBINHOOD_CLIENT_SECRET")
 
         # Log credential loading for debugging
         logger.debug("Auth credentials loaded",
                       api_key_present=bool(self.api_key),
                       private_key_present=bool(self.private_key_b64),
                       public_key_present=bool(self.public_key_b64),
-                      oauth_token_present=bool(self.oauth_api_token),
-                      oauth_client_id_present=bool(self.oauth_client_id),
-                      oauth_client_secret_present=bool(self.oauth_client_secret),
                       sandbox=self.sandbox)
 
         # Base URL for different environments (same for sandbox and production)
@@ -145,37 +138,19 @@ class RobinhoodSignatureAuth:
         self._public_key: Optional[str] = None
         self._authenticated = False
 
-        # Check for OAuth 2.0 credentials first (preferred method)
-        if self.oauth_api_token and self.oauth_client_id and self.oauth_client_secret:
-            self._initialize_oauth_auth()
-        # Fall back to legacy private/public key authentication
-        elif self.api_key and self.private_key_b64:
-            # Private key authentication: More secure, allows request signing
-            self._initialize_private_key_auth()
-        elif self.api_key and self.public_key_b64:
-            # Public key authentication: Simplified, direct key verification
-            self._initialize_public_key_auth()
+        # Initialize signature-based authentication
+        if self.api_key and self.private_key_b64:
+            self._initialize_signature_auth()
         else:
-            # No valid authentication method found
-            missing_oauth = []
-            if not self.oauth_api_token:
-                missing_oauth.append("ROBINHOOD_API_TOKEN")
-            if not self.oauth_client_id:
-                missing_oauth.append("ROBINHOOD_CLIENT_ID")
-            if not self.oauth_client_secret:
-                missing_oauth.append("ROBINHOOD_CLIENT_SECRET")
-
-            missing_legacy = []
+            # Provide detailed error message
+            missing = []
             if not self.api_key:
-                missing_legacy.append("ROBINHOOD_API_KEY")
-            if not self.private_key_b64 and not self.public_key_b64:
-                missing_legacy.append("ROBINHOOD_PRIVATE_KEY or ROBINHOOD_PUBLIC_KEY")
-
-            error_msg = "No valid authentication credentials found. Please configure either:\n"
-            if missing_oauth:
-                error_msg += f"OAuth 2.0 (recommended): {', '.join(missing_oauth)}\n"
-            if missing_legacy:
-                error_msg += f"Legacy private/public key: {', '.join(missing_legacy)}\n"
+                missing.append("ROBINHOOD_API_KEY or RH_API_KEY")
+            if not self.private_key_b64:
+                missing.append("ROBINHOOD_PRIVATE_KEY or RH_BASE64_PRIVATE_KEY")
+            
+            error_msg = f"API credentials required but missing: {', '.join(missing)}. "
+            error_msg += "Please set these environment variables in your .env file. "
             error_msg += "See config/.env.example for configuration examples."
 
             raise AuthenticationError(error_msg)
@@ -186,129 +161,87 @@ class RobinhoodSignatureAuth:
             raise AuthenticationError("Authentication not initialized")
         return self.api_key
 
-    def get_private_key(self) -> str:
-        """Get the private key for signing."""
-        if not self._authenticated or not self._private_key:
-            raise AuthenticationError("Private key not available")
-        return self._private_key
-
-    def get_public_key(self) -> str:
-        """Get the public key for authentication."""
-        if not self._authenticated or not self._public_key:
-            raise AuthenticationError("Public key not available")
-        return self._public_key
-
     def is_authenticated(self) -> bool:
         """Check if authentication is properly configured."""
         logger.debug("Checking authentication status", authenticated=self._authenticated)
         return self._authenticated
 
-    def _initialize_private_key_auth(self):
+    def _initialize_signature_auth(self):
         """
-        Initialize private key-based authentication with automatic public key derivation.
+        Initialize API key + private key authentication (fallback method).
 
-        This method validates the provided private key and derives the corresponding
-        public key for authentication. Private key authentication is more secure as it
-        allows for request signing, but requires careful key management.
+        This method validates and stores API key and private key credentials
+        for signature-based authentication.
 
         Raises:
-            AuthenticationError: If private key is invalid or cannot be processed.
+            AuthenticationError: If credentials are invalid.
         """
-        if not self.private_key_b64:
-            raise AuthenticationError("Private key is required for private key authentication")
+        if not self.api_key or not self.private_key_b64:
+            raise AuthenticationError("API key and private key are required for signature authentication")
 
-        # Step 1: Validate and process the private key
         try:
-            # Import required modules for key processing
-            from ecdsa import SigningKey
-            from base64 import b64decode, b64encode
+            # Validate private key format
+            private_key_bytes = b64decode(self.private_key_b64)
+            if len(private_key_bytes) != 32:
+                raise AuthenticationError("Private key must be 32 bytes when decoded")
 
-            # Step 2: Decode the base64-encoded private key into DER format
-            private_key_der = b64decode(self.private_key_b64)
-            logger.debug("Private key decoded successfully")
-
-            # Step 3: Create ECDSA signing key object from DER data
-            signing_key = SigningKey.from_der(private_key_der)
-            logger.debug("ECDSA signing key created from DER")
-
-            # Step 4: Store the private key and derive the public key
+            # Store credentials
             self._private_key = self.private_key_b64
-            self._public_key = b64encode(signing_key.verifying_key.to_der()).decode('utf-8')
-            logger.debug("Public key derived from private key")
-
-            # Step 5: Mark authentication as successful
+            self._public_key = None  # Will be derived when needed
             self._authenticated = True
-            logger.info("Robinhood private key authentication initialized successfully")
+
+            logger.info("Robinhood signature authentication initialized successfully")
+
         except Exception as e:
-            # Handle key validation errors with detailed message
-            raise AuthenticationError(f"Failed to initialize private key: {e}")
+            raise AuthenticationError(f"Invalid private key format: {str(e)}")
 
-    def _initialize_public_key_auth(self):
+    def get_signature_headers(self, method: str, path: str, body: str = "", timestamp: Optional[int] = None) -> Dict[str, str]:
         """
-        Initialize public key-based authentication for simplified access.
+        Generate signature headers for API requests.
 
-        This method validates the provided public key for direct authentication.
-        Public key authentication is simpler but less secure than private key mode,
-        as it doesn't support request signing.
+        Args:
+            method: HTTP method (GET, POST, etc.)
+            path: API endpoint path
+            body: Request body (for POST requests)
+            timestamp: Unix timestamp (defaults to current time)
 
-        Raises:
-            AuthenticationError: If public key is invalid or cannot be processed.
+        Returns:
+            Dictionary of authorization headers
         """
-        if not self.public_key_b64:
-            raise AuthenticationError("Public key is required for public key authentication")
+        if not self._authenticated or not self._private_key:
+            raise AuthenticationError("Signature authentication not initialized")
 
-        # Step 1: Validate the public key format
+        if timestamp is None:
+            timestamp = int(time.time())
+
+        # Import here to avoid circular imports
+        import time
+        from base64 import b64encode
+        from nacl.signing import SigningKey
+
         try:
-            # Import required module for key decoding
-            from base64 import b64decode
+            private_key_bytes = b64decode(self._private_key)
+            signing_key = SigningKey(private_key_bytes)
+            
+            message_to_sign = f"{self.api_key}{timestamp}{path}{method}{body}"
+            signed = signing_key.sign(message_to_sign.encode("utf-8"))
 
-            # Step 2: Decode the base64-encoded public key into DER format
-            public_key_der = b64decode(self.public_key_b64)
-            logger.debug("Public key decoded successfully")
-
-            # Step 3: Store the public key (no private key available)
-            self._public_key = self.public_key_b64
-            self._authenticated = True
-
-            # Step 4: Log successful initialization
-            logger.info("Robinhood public key authentication initialized successfully")
+            return {
+                "x-api-key": self.api_key,
+                "x-signature": b64encode(signed.signature).decode("utf-8"),
+                "x-timestamp": str(timestamp),
+            }
         except Exception as e:
-            # Handle key validation errors with detailed message
-            raise AuthenticationError(f"Failed to initialize public key: {e}")
-
-    def _initialize_oauth_auth(self):
-        """
-        Initialize OAuth 2.0 authentication (preferred method).
-
-        This method validates OAuth 2.0 credentials for modern authentication.
-        OAuth 2.0 is the recommended authentication method for new applications.
-
-        Raises:
-            AuthenticationError: If OAuth credentials are invalid.
-        """
-        if not self.oauth_api_token or not self.oauth_client_id or not self.oauth_client_secret:
-            raise AuthenticationError("OAuth 2.0 credentials are incomplete")
-
-        # Store OAuth credentials
-        self._oauth_token = self.oauth_api_token
-        self._authenticated = True
-
-        logger.info("Robinhood OAuth 2.0 authentication initialized successfully")
+            raise AuthenticationError(f"Failed to generate signature headers: {str(e)}")
 
     def get_auth_info(self) -> Dict:
         """Get information about the authentication configuration."""
-        auth_type = "oauth"
-        if hasattr(self, '_private_key') and self._private_key:
-            auth_type = "private_key"
-        elif hasattr(self, '_public_key') and self._public_key:
-            auth_type = "public_key"
+        auth_type = "signature" if hasattr(self, '_private_key') and self._private_key else "unknown"
 
         return {
             "authenticated": self._authenticated,
             "api_key_prefix": self.api_key[:20] + "..." if self.api_key else None,
             "private_key_prefix": self._private_key[:30] + "..." if hasattr(self, '_private_key') and self._private_key else None,
-            "public_key_prefix": self._public_key[:30] + "..." if hasattr(self, '_public_key') and self._public_key else None,
-            "oauth_token_prefix": self._oauth_token[:20] + "..." if hasattr(self, '_oauth_token') and self._oauth_token else None,
             "sandbox": self.sandbox,
             "base_url": self.base_url,
             "auth_type": auth_type,

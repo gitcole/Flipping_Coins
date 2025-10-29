@@ -27,6 +27,7 @@ import socket
 import ssl
 import time
 from dataclasses import dataclass
+from enum import Enum
 from typing import Dict, List, Optional, Union
 from urllib.parse import urlparse
 
@@ -45,6 +46,14 @@ from .robinhood.client import RobinhoodClient, RobinhoodAPIConfig
 from .robinhood.auth import RobinhoodSignatureAuth
 
 logger = structlog.get_logger(__name__)
+
+
+class HealthStatus(Enum):
+    """Health status levels for connectivity checks."""
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+    CRITICAL = "critical"
 
 
 @dataclass

@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Union
 from urllib.parse import urlencode
 
 import structlog
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from ..exceptions import RobinhoodAPIError
 
@@ -33,20 +33,23 @@ class Order(BaseModel):
     account_id: Optional[str] = Field(None, description="Account ID")
     instrument_id: Optional[str] = Field(None, description="Instrument ID")
 
-    @validator('side')
+    @field_validator('side')
+    @classmethod
     def validate_side(cls, v):
         if v.lower() not in ['buy', 'sell']:
             raise ValueError('Side must be "buy" or "sell"')
         return v.lower()
 
-    @validator('order_type')
+    @field_validator('order_type')
+    @classmethod
     def validate_order_type(cls, v):
         valid_types = ['market', 'limit', 'stop', 'stop_limit', 'trailing_stop']
         if v.lower() not in valid_types:
             raise ValueError(f'Order type must be one of: {valid_types}')
         return v.lower()
 
-    @validator('time_in_force')
+    @field_validator('time_in_force')
+    @classmethod
     def validate_time_in_force(cls, v):
         valid_tif = ['gtc', 'gtd', 'ioc', 'fok', 'opg']
         if v.lower() not in valid_tif:

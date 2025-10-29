@@ -10,11 +10,11 @@ from unittest.mock import Mock, AsyncMock, patch
 from decimal import Decimal
 from datetime import datetime, timedelta
 
-from strategies.base.strategy import (
+from src.strategies.base.strategy import (
     BaseStrategy, StrategyConfig, StrategyStatus, SignalDirection,
     TradingSignal, StrategyMetrics
 )
-from core.config.manager import ConfigManager
+from src.core.config.manager import ConfigManager
 from tests.utils.base_test import UnitTestCase
 
 

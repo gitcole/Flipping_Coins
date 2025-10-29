@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 from datetime import datetime, timedelta
 
 import structlog
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from ...core.config import ConfigurationManager
 from ...utils.logging import get_logger
@@ -93,7 +93,8 @@ class StrategyConfig(BaseModel):
     take_profit_enabled: bool = Field(True, description="Enable take profit")
     max_slippage: Decimal = Field(Decimal('0.001'), description="Maximum slippage tolerance")
 
-    @validator('risk_per_trade', 'max_portfolio_risk', 'max_slippage')
+    @field_validator('risk_per_trade', 'max_portfolio_risk', 'max_slippage')
+    @classmethod
     def validate_decimals(cls, v):
         if v < 0:
             raise ValueError("Risk values must be non-negative")

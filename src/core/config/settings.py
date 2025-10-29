@@ -6,7 +6,7 @@ import os
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class AppSettings(BaseModel):
@@ -18,7 +18,8 @@ class AppSettings(BaseModel):
     log_level: str = Field(default="INFO", description="Logging level")
     environment: str = Field(default="development", description="Environment (development, staging, production)")
 
-    @validator("log_level")
+    @field_validator("log_level")
+    @classmethod
     def validate_log_level(cls, v: str) -> str:
         """Validate log level."""
         valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -26,7 +27,8 @@ class AppSettings(BaseModel):
             raise ValueError(f"Log level must be one of: {valid_levels}")
         return v.upper()
 
-    @validator("environment")
+    @field_validator("environment")
+    @classmethod
     def validate_environment(cls, v: str) -> str:
         """Validate environment."""
         valid_envs = ["development", "staging", "production"]
@@ -69,7 +71,8 @@ class TradingSettings(BaseModel):
     max_order_value: float = Field(default=10000.0, ge=1.0, description="Maximum order value")
     order_timeout: int = Field(default=30, ge=5, le=300, description="Order timeout in seconds")
 
-    @validator("supported_symbols")
+    @field_validator("supported_symbols")
+    @classmethod
     def validate_symbols(cls, v: List[str]) -> List[str]:
         """Validate trading symbols format."""
         if not v:
@@ -140,7 +143,8 @@ class NotificationSettings(BaseModel):
     email_password: Optional[str] = Field(default=None, description="Email password")
     email_recipients: List[str] = Field(default_factory=list, description="Email recipients")
 
-    @validator("email_recipients")
+    @field_validator("email_recipients")
+    @classmethod
     def validate_email_recipients(cls, v: List[str]) -> List[str]:
         """Validate email format."""
         import re
@@ -170,17 +174,17 @@ class LoggingSettings(BaseModel):
 class RobinhoodSettings(BaseModel):
     """Robinhood-specific settings."""
 
-    api_token: Optional[str] = Field(default=None, alias="ROBINHOOD_API_TOKEN", description="Robinhood API token")
-    client_id: Optional[str] = Field(default=None, alias="ROBINHOOD_CLIENT_ID", description="Robinhood OAuth client ID")
-    client_secret: Optional[str] = Field(default=None, alias="ROBINHOOD_CLIENT_SECRET", description="Robinhood OAuth client secret")
+    # Support both new naming convention (RH_*) and old (ROBINHOOD_*)
     api_key: Optional[str] = Field(default=None, alias="ROBINHOOD_API_KEY", description="Robinhood Crypto API key")
     private_key: Optional[str] = Field(default=None, alias="ROBINHOOD_PRIVATE_KEY", description="Robinhood Crypto private key (base64)")
     public_key: Optional[str] = Field(default=None, alias="ROBINHOOD_PUBLIC_KEY", description="Robinhood Crypto public key (base64)")
     sandbox: bool = Field(default=False, alias="ROBINHOOD_SANDBOX", description="Use sandbox/testnet environment")
 
-    class Config:
-        """Pydantic configuration for Robinhood settings."""
-        validate_by_name = True
+    # Additional aliases for enhanced bot compatibility
+    rh_api_key: Optional[str] = Field(default=None, alias="RH_API_KEY", description="Robinhood API key (enhanced format)")
+    rh_base64_private_key: Optional[str] = Field(default=None, alias="RH_BASE64_PRIVATE_KEY", description="Robinhood private key (base64, enhanced format)")
+
+    model_config = ConfigDict(validate_by_name=True)
 
 
 class ExchangeSettings(BaseModel):
@@ -208,13 +212,13 @@ class Settings(BaseModel):
     exchange: ExchangeSettings = Field(default_factory=ExchangeSettings, description="Exchange settings")
     robinhood: RobinhoodSettings = Field(default_factory=RobinhoodSettings, description="Robinhood settings")
 
-    class Config:
-        """Pydantic configuration."""
-        env_file = None  # Disable Pydantic's env loading since we handle it manually
-        env_file_encoding = "utf-8"
-        case_sensitive = False
-        validate_assignment = True
-        validate_by_name = True
+    model_config = ConfigDict(
+        env_file=None,  # Disable Pydantic's env loading since we handle it manually
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        validate_assignment=True,
+        validate_by_name=True
+    )
 
     def __init__(self, **data):
         """Initialize settings with environment variable overrides."""

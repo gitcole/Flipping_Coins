@@ -10,8 +10,9 @@ from unittest.mock import AsyncMock, Mock, MagicMock
 from typing import Dict, Any
 
 from tests.utils.base_test import UnitTestCase
-from core.risk.risk_manager import RiskManager, RiskLimitExceededError, RiskValidationError
-from core.engine.position_manager import Position, PositionManager
+from src.risk.manager import RiskManager, RiskLimitExceededError, RiskValidationError
+from src.core.engine.position_manager import Position, PositionManager
+from unittest.mock import patch
 
 
 class TestRiskManager(UnitTestCase):
@@ -43,7 +44,7 @@ class TestRiskManager(UnitTestCase):
             result = await self.risk_manager.validate_trade(
                 symbol="BTC",
                 side="BUY",
-                quantity=0.1,
+                quantity=0.001,  # Reduced quantity to avoid concentration risk (0.001 * 50000 = $50, which is 0.5% of $10k portfolio)
                 price=50000.0,
                 strategy="test_strategy"
             )
@@ -84,7 +85,7 @@ class TestRiskManager(UnitTestCase):
         self.position_manager.portfolio_value = 10000.0
 
         # Mock the portfolio risk calculation to return high risk
-        with pytest.mock.patch.object(
+        with patch.object(
             self.risk_manager,
             '_calculate_portfolio_risk',
             return_value=0.15  # 15% risk, above 10% limit
@@ -110,7 +111,7 @@ class TestRiskManager(UnitTestCase):
         self.position_manager.portfolio_value = 10000.0
 
         # Mock correlation risk to exceed limit
-        with pytest.mock.patch.object(
+        with patch.object(
             self.risk_manager,
             '_calculate_correlation_risk',
             return_value=0.8  # Above 0.7 limit
@@ -136,7 +137,7 @@ class TestRiskManager(UnitTestCase):
         self.position_manager.portfolio_value = 1000.0
 
         # Mock concentration check to exceed limit
-        with pytest.mock.patch.object(
+        with patch.object(
             self.risk_manager,
             '_check_concentration_risk',
             return_value=False
@@ -159,7 +160,7 @@ class TestRiskManager(UnitTestCase):
     def test_validate_trade_strategy_limits_exceeded(self):
         """Test trade validation fails when strategy limits are exceeded."""
         # Arrange
-        with pytest.mock.patch.object(
+        with patch.object(
             self.risk_manager,
             '_check_strategy_limits',
             return_value=False

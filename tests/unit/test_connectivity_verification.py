@@ -15,8 +15,7 @@ from src.core.api.connectivity_check import (
     ConnectivityChecker,
     ConnectivityCheckResult,
     ComprehensiveConnectivityResult,
-    HealthStatus,
-    AlertLevel
+    HealthStatus
 )
 from src.core.api.health_check import (
     HealthMonitor,

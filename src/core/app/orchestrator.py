@@ -6,11 +6,24 @@ import asyncio
 import signal
 from typing import Dict, List, Optional
 
-from ...risk import RiskManager
+from ...risk.manager import RiskManager
 from ...strategies.registry import StrategyRegistry, StrategyRegistryConfig
 from ...utils.logging import get_logger
 from ..api.robinhood.client import RobinhoodClient
 from ..api.robinhood.crypto_api import RobinhoodCryptoAPI
+
+# Import enhanced API client for reliable connections
+import os
+import base64
+from pathlib import Path
+import requests
+from nacl.signing import SigningKey
+
+from typing import Any, Dict, Optional
+import datetime
+import json
+import time
+from urllib.parse import urlparse
 from ..config import get_settings, get_config_manager
 from ..engine.position_manager import PositionManager
 from ..engine.strategy_executor import StrategyExecutor
@@ -48,16 +61,20 @@ class ApplicationOrchestrator:
         >>> await orchestrator.shutdown()
     """
 
-    def __init__(self):
+    def __init__(self, use_enhanced_api: bool = True):
         """
         Initialize application orchestrator.
 
         Sets up all core components, signal handlers for graceful shutdown,
         and initializes health monitoring systems. All components are created
         but not started until the start() method is called.
+
+        Args:
+            use_enhanced_api: Whether to use the enhanced API implementation (default: True)
         """
         self.settings = get_settings()
         self.logger = get_logger("app.orchestrator")
+        self.use_enhanced_api = use_enhanced_api
 
         # Core components
         self.market_data_client: Optional[MarketDataClient] = None
@@ -201,13 +218,32 @@ class ApplicationOrchestrator:
 
         # Robinhood client
         settings = get_settings()
-        if settings.robinhood.api_token:
-            self.robinhood_client = RobinhoodClient(sandbox=settings.robinhood.sandbox)
+        # Note: RobinhoodClient initialization removed as it's not needed with signature auth
 
-        # Robinhood Crypto API (now uses OAuth2 like the main client)
-        if settings.robinhood.api_token:
-            from ..api.robinhood.crypto_api import RobinhoodCryptoAPI
-            self.crypto_api = RobinhoodCryptoAPI(settings.robinhood.api_token)
+        # Enhanced Robinhood Crypto API (primary implementation - uses API key + private key)
+        if self.use_enhanced_api:
+            self.logger.info("🔧 Initializing Enhanced Crypto API as primary implementation...")
+            try:
+                self.crypto_api = EnhancedRobinhoodCryptoAPI(config_path=".env")
+                self.logger.info("✅ Enhanced Crypto API initialized successfully (primary)")
+            except Exception as e:
+                self.logger.warning(f"⚠️  Enhanced Crypto API initialization failed: {str(e)}")
+                self.logger.info("🔄 Standard crypto API not available without proper credentials")
+                self.crypto_api = None
+        else:
+            # Try to initialize with signature authentication
+            self.logger.info("🔧 Initializing Standard Crypto API...")
+            try:
+                if settings.robinhood.api_key and settings.robinhood.private_key:
+                    from ..api.robinhood.crypto_api import RobinhoodCryptoAPI
+                    self.crypto_api = RobinhoodCryptoAPI(settings.robinhood.api_key)
+                    self.logger.info("✅ Standard Crypto API initialized")
+                else:
+                    self.logger.error("❌ No API credentials available (need api_key and private_key)")
+                    self.crypto_api = None
+            except Exception as e:
+                self.logger.error(f"❌ Standard Crypto API initialization failed: {str(e)}")
+                self.crypto_api = None
 
         self.logger.info("All components initialized")
 
@@ -521,6 +557,365 @@ class ApplicationOrchestrator:
         }
 
     def _get_event_loop(self):
+        """Get the event loop for thread-safe operations."""
+        try:
+            return asyncio.get_event_loop()
+        except RuntimeError:
+            # Create new event loop if none exists
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop
+
+
+class EnhancedRobinhoodCryptoAPI:
+    """
+    Enhanced Robinhood Crypto API client with robust authentication and error handling.
+
+    This is the working implementation based on crypto_trading_bot_enhanced.py,
+    providing reliable API connectivity for the main application.
+    """
+
+    def __init__(self, config_path: str = ".env", verbose: bool = True):
+        """Initialize the enhanced API client."""
+        self.verbose = verbose
+        self.config_path = config_path
+        self.api_key = None
+        self.private_key = None
+        self.base_url = "https://trading.robinhood.com"
+        self.rate_limiter = RateLimitTracker()
+        self.request_count = 0
+        self.account_info = None
+
+        # Load credentials and initialize
+        self._load_credentials()
+        self._initialize_api()
+
+    def _load_credentials(self) -> None:
+        """Load API credentials from environment file."""
+        config_file = Path(self.config_path)
+
+        if not config_file.exists():
+            raise FileNotFoundError(
+                f"Configuration file not found: {config_file}. "
+                "Please ensure .env file exists with RH_API_KEY and RH_BASE64_PRIVATE_KEY"
+            )
+
+        # Load environment variables
+        with open(config_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key] = value
+
+        # Extract required credentials
+        self.api_key = os.getenv("RH_API_KEY")
+        base64_private_key = os.getenv("RH_BASE64_PRIVATE_KEY")
+
+        if not self.api_key or not base64_private_key:
+            raise ValueError(
+                "Required API credentials not found. Ensure RH_API_KEY and RH_BASE64_PRIVATE_KEY "
+                "are set in the .env file"
+            )
+
+        # Initialize private key
+        private_key_seed = base64.b64decode(base64_private_key)
+        self.private_key = SigningKey(private_key_seed)
+
+    def _initialize_api(self) -> None:
+        """Initialize API client and verify connection."""
+        # Test connection
+        account_info = self.get_account()
+
+        if account_info and "error" not in account_info:
+            self.account_info = account_info
+        else:
+            error_msg = account_info.get("details", "Unknown error") if account_info else "No response"
+            raise ConnectionError(f"Failed to connect to API: {error_msg}")
+
+    def _log(self, message: str, level: str = "INFO") -> None:
+        """Log messages if verbose mode is enabled."""
+        if self.verbose:
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[{timestamp}] [{level}] {message}")
+
+    @staticmethod
+    def _get_current_timestamp() -> int:
+        """Get current UTC timestamp."""
+        return int(datetime.datetime.now(tz=datetime.timezone.utc).timestamp())
+
+    def _get_authorization_headers(
+        self, method: str, path: str, body: str = "", timestamp: Optional[int] = None
+    ) -> Dict[str, str]:
+        """Generate authorization headers for API request."""
+        if timestamp is None:
+            timestamp = self._get_current_timestamp()
+
+        message_to_sign = f"{self.api_key}{timestamp}{path}{method}{body}"
+        signed = self.private_key.sign(message_to_sign.encode("utf-8"))
+
+        return {
+            "x-api-key": self.api_key,
+            "x-signature": base64.b64encode(signed.signature).decode("utf-8"),
+            "x-timestamp": str(timestamp),
+        }
+
+    def _make_request(
+        self,
+        method: str,
+        path: str,
+        body: str = "",
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+        **kwargs
+    ) -> Any:
+        """Make an API request with comprehensive error handling and retry logic."""
+        # Check rate limiting
+        if not self.rate_limiter.can_make_request():
+            wait_time = self.rate_limiter.get_wait_time()
+            self._log(f"Rate limit reached. Waiting {wait_time:.1f} seconds...", "WARNING")
+            time.sleep(wait_time)
+
+        # Build full URL path with query parameters, including them in signature
+        signature_path = path
+        url_path = path
+        if kwargs:
+            query_parts = []
+            for key, value in kwargs.items():
+                if value is not None:
+                    if isinstance(value, (list, tuple)):
+                        for item in value:
+                            query_parts.append(f"{key}={item}")
+                    else:
+                        query_parts.append(f"{key}={value}")
+            if query_parts:
+                query_string = "&".join(query_parts)
+                url_path += "?" + query_string
+                signature_path += "?" + query_string  # Include query params in signature
+
+        for attempt in range(max_retries):
+            try:
+                timestamp = self._get_current_timestamp()
+                headers = self._get_authorization_headers(method, signature_path, body, timestamp)
+                url = self.base_url + url_path
+
+                self._log(f"API Request #{self.request_count + 1}: {method} {path}")
+
+                # Make the HTTP request
+                if method.upper() == "GET":
+                    response = requests.get(url, headers=headers, timeout=10)
+                elif method.upper() == "POST":
+                    response = requests.post(
+                        url,
+                        headers=headers,
+                        json=json.loads(body) if body else {},
+                        timeout=10
+                    )
+                else:
+                    raise ValueError(f"Unsupported HTTP method: {method}")
+
+                # Record request for rate limiting
+                self.rate_limiter.record_request()
+                self.request_count += 1
+
+                # Handle successful responses
+                if response.status_code in [200, 201]:
+                    self._log(f"Success: {response.status_code}", "INFO")
+                    return response.json() if response.text else {}
+
+                # Handle authentication errors
+                elif response.status_code == 401:
+                    self._log(f"Authentication failed: {response.text}", "ERROR")
+                    return {"error": "authentication_failed", "details": response.text}
+
+                # Handle rate limiting
+                elif response.status_code == 429:
+                    self._log(f"Rate limited. Attempt {attempt + 1}/{max_retries}", "WARNING")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+                        continue
+                    return {"error": "rate_limited", "details": "Maximum retries exceeded"}
+
+                # Handle bad requests
+                elif response.status_code == 400:
+                    self._log(f"Bad request: {response.text}", "ERROR")
+                    return {"error": "bad_request", "details": response.text}
+
+                # Handle server errors with retry
+                elif response.status_code >= 500:
+                    self._log(f"Server error {response.status_code}. Retrying...", "WARNING")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay * (2 ** attempt))
+                        continue
+                    return {"error": "server_error", "status_code": response.status_code}
+
+                # Handle other HTTP errors
+                else:
+                    self._log(f"HTTP {response.status_code}: {response.text}", "ERROR")
+                    return {
+                        "error": "http_error",
+                        "status_code": response.status_code,
+                        "details": response.text
+                    }
+
+            except requests.Timeout:
+                self._log(f"Request timeout (attempt {attempt + 1}/{max_retries})", "WARNING")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (2 ** attempt))
+                    continue
+                return {"error": "timeout", "details": "Request timeout after all retries"}
+
+            except requests.RequestException as e:
+                self._log(f"Request error: {e}", "ERROR")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (2 ** attempt))
+                    continue
+                return {"error": "request_failed", "details": str(e)}
+
+            except json.JSONDecodeError as e:
+                self._log(f"JSON decode error: {e}", "ERROR")
+                return {"error": "json_decode_failed", "details": str(e)}
+
+            except Exception as e:
+                self._log(f"Unexpected error: {e}", "ERROR")
+                return {"error": "unexpected_error", "details": str(e)}
+
+        # Max retries exceeded
+        self._log(f"Max retries ({max_retries}) exceeded", "ERROR")
+        return {"error": "max_retries_exceeded", "details": f"Failed after {max_retries} attempts"}
+
+    # ===== API Endpoints =====
+
+    def get_account(self) -> Dict[str, Any]:
+        """Get account information and status."""
+        return self._make_request("GET", "/api/v1/crypto/trading/accounts/")
+
+    def get_trading_pairs(self, *symbols: Optional[str]) -> Dict[str, Any]:
+        """Get trading pairs information."""
+        return self._make_request("GET", "/api/v1/crypto/trading/trading_pairs/", symbol=symbols)
+
+    def get_holdings(self, *asset_code: str) -> Dict[str, Any]:
+        """Get current cryptocurrency holdings."""
+        return self._make_request("GET", "/api/v1/crypto/trading/holdings/", asset_code=asset_code)
+
+    def get_best_bid_ask(self, *symbols: Optional[str]) -> Dict[str, Any]:
+        """Get current best bid and ask prices for specified symbols."""
+        return self._make_request("GET", "/api/v1/crypto/marketdata/best_bid_ask/", symbol=symbols)
+
+    def get_estimated_price(self, symbol: str, side: str, quantity: str) -> Dict[str, Any]:
+        """Get estimated price for a potential trade."""
+        params = {
+            "symbol": f"{symbol}-USD",
+            "side": side,
+            "quantity": str(quantity)
+        }
+
+        return self._make_request(
+            "GET",
+            "/marketdata/api/v1/estimated_price/",
+            **params
+        )
+
+    def place_order(
+        self,
+        client_order_id: str,
+        side: str,
+        order_type: str,
+        symbol: str,
+        order_config: Dict[str, str]
+    ) -> Dict[str, Any]:
+        """Place a new cryptocurrency order."""
+        body = {
+            "client_order_id": client_order_id,
+            "side": side,
+            "type": order_type,
+            "symbol": symbol,
+            f"{order_type}_order_config": order_config,
+        }
+
+        return self._make_request("POST", "/api/v1/crypto/trading/orders/", body=json.dumps(body))
+
+    def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        """Cancel an existing order."""
+        return self._make_request("POST", f"/api/v1/crypto/trading/orders/{order_id}/cancel/")
+
+    def get_order(self, order_id: str) -> Dict[str, Any]:
+        """Get details of a specific order."""
+        return self._make_request("GET", f"/api/v1/crypto/trading/orders/{order_id}/")
+
+    def get_orders(self, status: Optional[str] = None) -> Dict[str, Any]:
+        """Get list of orders with optional status filtering."""
+        return self._make_request("GET", "/api/v1/crypto/trading/orders/", status=status)
+
+    def get_rate_limit_stats(self) -> Dict[str, Any]:
+        """Get current rate limiting statistics."""
+        stats = self.rate_limiter.get_stats()
+        stats["total_requests_made"] = self.request_count
+        return stats
+
+    def get_quotes(self, *symbols: Optional[str]) -> Dict[str, Any]:
+        """Get quotes for specified symbols."""
+        formatted_symbols = [f"{symbol}-USD" if symbol else symbol for symbol in symbols]
+        return self._make_request("GET", "/api/v1/crypto/marketdata/best_bid_ask/", symbol=formatted_symbols)
+
+    def get_best_bid_ask(self, *symbols: Optional[str]) -> Dict[str, Any]:
+        """Get current best bid and ask prices for specified symbols."""
+        return self._make_request("GET", "/api/v1/crypto/marketdata/best_bid_ask/", symbol=list(symbols))
+
+    def get_connection_status(self) -> Dict[str, Any]:
+        """Get comprehensive connection and account status."""
+        return {
+            "api_connected": True,
+            "account_info": self.account_info,
+            "rate_limit_stats": self.get_rate_limit_stats(),
+            "request_count": self.request_count,
+            "timestamp": self._get_current_timestamp(),
+        }
+
+
+class RateLimitTracker:
+    """Rate limiting tracker for API requests."""
+
+    def __init__(self):
+        self.request_times = []
+        self.max_per_minute = 100
+        self.max_burst = 300
+
+    def can_make_request(self) -> bool:
+        """Check if a new request can be made without exceeding limits."""
+        now = time.time()
+        # Remove requests older than 1 minute
+        self.request_times = [t for t in self.request_times if now - t < 60]
+        return len(self.request_times) < self.max_burst
+
+    def record_request(self) -> None:
+        """Record that a request was made."""
+        self.request_times.append(time.time())
+
+    def get_wait_time(self) -> float:
+        """Calculate how long to wait before next request."""
+        if not self.request_times:
+            return 0
+
+        now = time.time()
+        self.request_times = [t for t in self.request_times if now - t < 60]
+
+        if len(self.request_times) >= self.max_burst:
+            oldest = min(self.request_times)
+            return max(0, 60 - (now - oldest))
+        return 0
+
+    def get_stats(self) -> Dict[str, int]:
+        """Get current rate limiting statistics."""
+        now = time.time()
+        self.request_times = [t for t in self.request_times if now - t < 60]
+
+        return {
+            "requests_last_minute": len(self.request_times),
+            "remaining_capacity": self.max_burst - len(self.request_times),
+            "max_per_minute": self.max_per_minute,
+            "max_burst": self.max_burst,
+        }
         """Get the event loop for thread-safe operations."""
         try:
             return asyncio.get_event_loop()

@@ -61,7 +61,6 @@ class TestEnhancedMockingScenarios(UnitTestCase):
         self.rate_limiter = RateLimitTester()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_mock_error_patterns(self):
         """Test that mock API can simulate different error patterns."""
         # Setup error pattern for specific endpoint
@@ -82,7 +81,6 @@ class TestEnhancedMockingScenarios(UnitTestCase):
             assert error_type == "timeout", "Should return configured error type"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_mock_network_conditions(self):
         """Test network condition simulation."""
         # Setup network condition
@@ -97,7 +95,6 @@ class TestEnhancedMockingScenarios(UnitTestCase):
         assert actual_time > 0.1, "Network condition should add latency"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_mock_rate_limiting_simulation(self):
         """Test rate limiting simulation."""
         # Test rate limit exceeded scenario
@@ -110,7 +107,6 @@ class TestEnhancedMockingScenarios(UnitTestCase):
         assert history[-1]['event'] == 'rate_limit_exceeded', "Should record correct event type"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_mock_malformed_response_simulation(self):
         """Test malformed response simulation."""
         # Test malformed JSON
@@ -122,7 +118,6 @@ class TestEnhancedMockingScenarios(UnitTestCase):
         assert empty_response == "", "Should return empty response"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_mock_large_response_simulation(self):
         """Test large response simulation."""
         # Test large response (1MB)
@@ -133,7 +128,6 @@ class TestEnhancedMockingScenarios(UnitTestCase):
         assert "data" in large_response, "Should have expected structure"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_mock_scenario_builder(self):
         """Test scenario builder functionality."""
         builder = MockScenarioBuilder()
@@ -159,7 +153,6 @@ class TestClientErrorHandling(UnitTestCase):
         self.mock_api = EnhancedApiMock()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_client_timeout_handling(self):
         """Test client timeout handling."""
         client = RobinhoodClient(sandbox=True)
@@ -177,7 +170,6 @@ class TestClientErrorHandling(UnitTestCase):
             await client.get_user()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_client_retry_logic(self):
         """Test client retry logic."""
         client = RobinhoodClient(sandbox=True)
@@ -203,7 +195,6 @@ class TestClientErrorHandling(UnitTestCase):
         assert call_count == 3, "Should have made 3 attempts (initial + 2 retries)"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_client_rate_limit_handling(self):
         """Test client rate limit handling."""
         client = RobinhoodClient(sandbox=True)
@@ -230,7 +221,6 @@ class TestClientErrorHandling(UnitTestCase):
         assert call_count == 3, "Should have made multiple attempts with rate limit handling"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_client_authentication_error_handling(self):
         """Test client authentication error handling."""
         client = RobinhoodClient(sandbox=True)
@@ -248,7 +238,6 @@ class TestClientErrorHandling(UnitTestCase):
             await client.get_user()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_client_malformed_response_handling(self):
         """Test client handling of malformed responses."""
         client = RobinhoodClient(sandbox=True)
@@ -273,7 +262,6 @@ class TestNetworkConnectivityMocking(UnitTestCase):
         super().setup_method()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     @pytest.mark.network
     def test_dns_resolution_mock(self):
         """Test DNS resolution with mocked responses."""
@@ -294,7 +282,6 @@ class TestNetworkConnectivityMocking(UnitTestCase):
             assert result is False, "DNS resolution should fail for invalid host"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     @pytest.mark.network
     def test_tcp_connection_mock(self):
         """Test TCP connection with mocked responses."""
@@ -315,7 +302,6 @@ class TestNetworkConnectivityMocking(UnitTestCase):
             assert result is False, "TCP connection should fail for invalid port"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     @pytest.mark.network
     def test_ssl_certificate_mock(self):
         """Test SSL certificate validation with mocked responses."""
@@ -353,7 +339,6 @@ class TestPerformanceMocking(UnitTestCase):
         self.performance_monitor = PerformanceMonitor()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     @pytest.mark.performance
     async def test_response_time_measurement(self):
         """Test response time measurement accuracy."""
@@ -376,7 +361,6 @@ class TestPerformanceMocking(UnitTestCase):
         assert result["data"] == "test", "Should return expected data"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     @pytest.mark.performance
     async def test_concurrent_request_performance(self):
         """Test performance under concurrent load."""
@@ -421,7 +405,6 @@ class TestEdgeCaseScenarios(UnitTestCase):
         super().setup_method()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_empty_response_handling(self):
         """Test handling of empty responses."""
         with patch('src.core.api.robinhood.client.httpx.AsyncClient') as mock_client:
@@ -443,7 +426,6 @@ class TestEdgeCaseScenarios(UnitTestCase):
             assert result is not None
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_unicode_response_handling(self):
         """Test handling of Unicode responses."""
         with patch('src.core.api.robinhood.client.httpx.AsyncClient') as mock_client:
@@ -463,7 +445,6 @@ class TestEdgeCaseScenarios(UnitTestCase):
             assert result == unicode_data, "Should handle Unicode response correctly"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_very_large_response_handling(self):
         """Test handling of very large responses."""
         with patch('src.core.api.robinhood.client.httpx.AsyncClient') as mock_client:
@@ -484,7 +465,6 @@ class TestEdgeCaseScenarios(UnitTestCase):
             assert "data" in result, "Should handle large response"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_response_with_null_values(self):
         """Test handling of responses with null values."""
         with patch('src.core.api.robinhood.client.httpx.AsyncClient') as mock_client:
@@ -518,7 +498,6 @@ class TestRateLimitMocking(UnitTestCase):
         self.rate_limiter = RateLimitTester(max_requests=5, time_window=1.0)
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_rate_limit_enforcement(self):
         """Test rate limit enforcement."""
         # Make requests up to the limit
@@ -531,7 +510,6 @@ class TestRateLimitMocking(UnitTestCase):
         assert not can_request, "Should be rate limited after reaching limit"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_rate_limit_window_reset(self):
         """Test rate limit window reset."""
         # Fill up rate limit
@@ -548,7 +526,6 @@ class TestRateLimitMocking(UnitTestCase):
         assert can_request, "Should be able to make requests after window reset"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_rate_limit_with_delays(self):
         """Test rate limiting with request delays."""
         # Make requests with delays
@@ -572,7 +549,6 @@ class TestAuthenticationEdgeCases(UnitTestCase):
         super().setup_method()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_auth_with_expired_keys(self):
         """Test authentication with expired or invalid keys."""
         # Test with obviously invalid key format
@@ -583,7 +559,6 @@ class TestAuthenticationEdgeCases(UnitTestCase):
             )
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_auth_key_derivation_edge_cases(self):
         """Test key derivation edge cases."""
         # Test that public key derivation is deterministic
@@ -598,7 +573,6 @@ class TestAuthenticationEdgeCases(UnitTestCase):
         assert auth1.get_public_key() == auth2.get_public_key(), "Key derivation should be deterministic"
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_auth_info_completeness_edge_cases(self):
         """Test auth info completeness in edge cases."""
         private_key = SigningKey.generate()
@@ -626,7 +600,6 @@ class TestClientConfigurationMocking(UnitTestCase):
         super().setup_method()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_client_config_validation(self):
         """Test client configuration validation."""
         # Test with invalid configuration
@@ -636,7 +609,6 @@ class TestClientConfigurationMocking(UnitTestCase):
                 # Client should attempt to load config and fail
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_client_initialization_with_mocked_config(self):
         """Test client initialization with mocked configuration."""
         with patch('src.core.api.robinhood.client.get_settings') as mock_get_settings:
@@ -663,7 +635,6 @@ class TestResponseValidationMocking(UnitTestCase):
         self.validator = APIResponseValidator()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_json_response_validation(self):
         """Test JSON response validation."""
         # Test valid response
@@ -676,7 +647,6 @@ class TestResponseValidationMocking(UnitTestCase):
             self.validator.validate_json_response({"id": "test"}, ["id", "name"])
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_response_time_validation(self):
         """Test response time validation."""
         # Test acceptable response time
@@ -687,7 +657,6 @@ class TestResponseValidationMocking(UnitTestCase):
             self.validator.validate_response_time(2.0, max_time=1.0)
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_schema_compliance_validation(self):
         """Test schema compliance validation."""
         # Test valid schema compliance
@@ -715,7 +684,6 @@ class TestErrorPropagationMocking(UnitTestCase):
         super().setup_method()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_error_chain_propagation(self):
         """Test that errors propagate correctly through the call chain."""
         client = RobinhoodClient(sandbox=True)
@@ -743,7 +711,6 @@ class TestErrorPropagationMocking(UnitTestCase):
             await client.get_user()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     async def test_error_context_preservation(self):
         """Test that error context is preserved."""
         client = RobinhoodClient(sandbox=True)
@@ -774,7 +741,6 @@ class TestMockIntegrationWithRealComponents(UnitTestCase):
         super().setup_method()
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_mock_integration_with_auth_component(self):
         """Test that mocks integrate properly with authentication components."""
         # Generate real test keys
@@ -797,7 +763,6 @@ class TestMockIntegrationWithRealComponents(UnitTestCase):
         # This tests the integration boundary
 
     @pytest.mark.unit
-    @pytest.mark.mock
     def test_mock_configuration_integration(self):
         """Test mock integration with configuration system."""
         with patch('src.core.api.robinhood.client.get_settings') as mock_get_settings:

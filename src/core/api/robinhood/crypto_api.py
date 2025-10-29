@@ -147,7 +147,7 @@ class RobinhoodCryptoAPI:
         - Comprehensive error handling and retry logic
         """
         logger.info("🔍 DEBUG: Initializing RobinhoodCryptoAPI")
-        self.api_key = access_token or get_settings().robinhood.api_key or get_settings().robinhood.api_token
+        self.api_key = access_token or get_settings().robinhood.api_key
         self.private_key_b64 = get_settings().robinhood.private_key
         self.base_url = base_url.rstrip("/")
         self.timeout = aiohttp.ClientTimeout(total=timeout)
@@ -198,46 +198,22 @@ class RobinhoodCryptoAPI:
         if not self.private_key:
             logger.warning("🔍 DEBUG: Private key could not be decoded - signature authentication will fail")
 
-        # Check for OAuth 2.0 credentials (new method)
-        oauth_client_id = getattr(get_settings().robinhood, 'client_id', None)
-        oauth_client_secret = getattr(get_settings().robinhood, 'client_secret', None)
-        oauth_api_token = getattr(get_settings().robinhood, 'api_token', None)
-
-        logger.info("🔍 DEBUG: === OAUTH 2.0 CREDENTIALS CHECK ===")
-        logger.info(f"🔍 DEBUG: OAuth Client ID set: {oauth_client_id is not None}")
-        logger.info(f"🔍 DEBUG: OAuth Client Secret set: {oauth_client_secret is not None}")
-        logger.info(f"🔍 DEBUG: OAuth API Token set: {oauth_api_token is not None}")
-
-        if oauth_client_id:
-            logger.info(f"🔍 DEBUG: OAuth Client ID length: {len(oauth_client_id)}")
-        if oauth_client_secret:
-            logger.info(f"🔍 DEBUG: OAuth Client Secret length: {len(oauth_client_secret)}")
-        if oauth_api_token:
-            logger.info(f"🔍 DEBUG: OAuth API Token length: {len(oauth_api_token)}")
-
         # Check environment mode
         sandbox_mode = getattr(get_settings().robinhood, 'sandbox', False)
         logger.info(f"🔍 DEBUG: Sandbox mode: {sandbox_mode}")
 
         # Authentication method detection
-        has_old_auth = self.api_key and self.private_key_b64 and self.private_key
-        has_oauth_auth = oauth_client_id and oauth_client_secret and oauth_api_token
+        has_signature_auth = self.api_key and self.private_key_b64 and self.private_key
 
-        logger.warning("🔍 DEBUG: === AUTHENTICATION METHOD DETECTION ===")
-        logger.warning(f"🔍 DEBUG: Old private key auth available: {has_old_auth}")
-        logger.warning(f"🔍 DEBUG: OAuth 2.0 auth available: {has_oauth_auth}")
+        logger.info("🔍 DEBUG: === SIGNATURE AUTHENTICATION CHECK ===")
+        logger.info(f"🔍 DEBUG: Signature auth available: {has_signature_auth}")
 
-        if not has_old_auth and not has_oauth_auth:
-            logger.error("🔍 DEBUG: NO VALID AUTHENTICATION METHOD FOUND!")
+        if not has_signature_auth:
+            logger.error("🔍 DEBUG: NO VALID SIGNATURE AUTHENTICATION FOUND!")
             logger.error("🔍 DEBUG: This indicates missing or invalid credentials")
-        elif has_old_auth and has_oauth_auth:
-            logger.warning("🔍 DEBUG: BOTH authentication methods available - using private key method")
-        elif has_oauth_auth:
-            logger.info("🔍 DEBUG: OAuth 2.0 authentication method available")
+            logger.error("🔍 DEBUG: Please configure RH_API_KEY and RH_BASE64_PRIVATE_KEY in your .env file")
         else:
-            logger.error("🔍 DEBUG: Only deprecated private key method available")
-            logger.error("🔍 DEBUG: According to documentation, private key auth is deprecated")
-            logger.error("🔍 DEBUG: Please configure OAuth 2.0 credentials for institutional access")
+            logger.info("🔍 DEBUG: Signature authentication is properly configured")
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -360,45 +336,38 @@ class RobinhoodCryptoAPI:
                 # Prepare body for signing - use compact JSON format
                 body = json.dumps(data, separators=(',', ':')) if data else ""
 
-                # Check if we have valid authentication credentials
-                oauth_client_id = getattr(get_settings().robinhood, 'client_id', None)
-                oauth_client_secret = getattr(get_settings().robinhood, 'client_secret', None)
-                oauth_api_token = getattr(get_settings().robinhood, 'api_token', None)
-
-                has_oauth = oauth_client_id and oauth_client_secret and oauth_api_token
+                # Check if we have valid signature authentication credentials
                 has_private_key = self.api_key and self.private_key_b64 and self.private_key
                 has_public_key = self.api_key and self.public_key_b64 is not None
 
                 # Check authentication method availability
-                if not has_oauth and not has_private_key and not has_public_key:
+                if not has_private_key and not has_public_key:
                     logger.error("🔍 DEBUG: No valid authentication credentials found")
-                    logger.error("🔍 DEBUG: OAuth 2.0 available: %s", has_oauth)
                     logger.error("🔍 DEBUG: Private key available: %s", has_private_key)
                     logger.error("🔍 DEBUG: Public key available: %s", has_public_key)
                     logger.error("🔍 DEBUG: Please configure authentication credentials in .env file")
-                    logger.error("🔍 DEBUG: Required: ROBINHOOD_API_TOKEN, ROBINHOOD_CLIENT_ID, ROBINHOOD_CLIENT_SECRET")
-                    logger.error("🔍 DEBUG: Or legacy: ROBINHOOD_API_KEY and ROBINHOOD_PRIVATE_KEY")
+                    logger.error("🔍 DEBUG: Required: RH_API_KEY and RH_BASE64_PRIVATE_KEY")
                     logger.error("🔍 DEBUG: Or public key: ROBINHOOD_API_KEY and ROBINHOOD_PUBLIC_KEY")
                     raise RobinhoodAPIError("No authentication credentials configured")
 
-                # Choose authentication method (OAuth 2.0 preferred)
-                logger.info(f"🔍 DEBUG: Authentication method selection - OAuth: {has_oauth}, Private: {has_private_key}, Public: {has_public_key}")
+                # Choose authentication method
+                logger.info(f"🔍 DEBUG: Authentication method selection - Private: {has_private_key}, Public: {has_public_key}")
 
-                if has_oauth:
-                    logger.info("🔍 DEBUG: Using OAuth 2.0 authentication")
-                    # TODO: Implement OAuth 2.0 authentication flow
-                    # For now, use API token as bearer token
-                    auth_method = "oauth"
-                    auth_token = oauth_api_token
-                elif has_private_key:
-                    logger.warning("🔍 DEBUG: Using deprecated private key authentication")
+                if has_private_key:
+                    logger.info("🔍 DEBUG: Using private key authentication")
                     auth_method = "private_key"
                 elif has_public_key:
                     logger.info("🔍 DEBUG: Using public key authentication")
                     auth_method = "public_key"
                 else:
-                    logger.error(f"🔍 DEBUG: No valid auth method - OAuth: {has_oauth}, Private: {has_private_key}, Public: {has_public_key}")
+                    logger.error(f"🔍 DEBUG: No valid auth method - Private: {has_private_key}, Public: {has_public_key}")
                     raise RobinhoodAPIError("No valid authentication method available")
+
+                # Initialize headers with base headers
+                headers = {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                }
 
                 # Generate signature for private key method
                 if auth_method == "private_key":
@@ -432,54 +401,29 @@ class RobinhoodCryptoAPI:
 
                     # Set headers based on authentication method
                     if auth_method == "private_key":
-                        headers = {
+                        headers.update({
                             "x-api-key": self.api_key,
                             "x-signature": signature_b64,
                             "x-timestamp": str(timestamp),
-                            "Accept": "application/json",
-                            "Content-Type": "application/json",
-                        }
-                    elif auth_method == "oauth":
-                        logger.info("🔍 DEBUG: Using OAuth 2.0 Bearer token authentication")
-                        headers = {
-                            "Authorization": f"Bearer {auth_token}",
-                            "Accept": "application/json",
-                            "Content-Type": "application/json",
-                        }
+                        })
                     elif auth_method == "public_key":
-                        headers = {
+                        headers.update({
                             "x-api-key": self.api_key,
-                            "Accept": "application/json",
-                            "Content-Type": "application/json",
-                        }
-
-                logger.info(f"🔍 DEBUG: Private key available for signing: {type(self.private_key)}")
-
-                try:
-                    signature = self.private_key.sign(message.encode('utf-8'))
-                    signature_b64 = b64encode(signature.signature).decode('utf-8')
-                    logger.info(f"🔍 DEBUG: Signature generated successfully")
-                    logger.info(f"🔍 DEBUG: Signature length: {len(signature_b64)}")
-                    logger.info(f"🔍 DEBUG: Signature preview: {signature_b64[:50]}...")
-                except Exception as e:
-                    logger.error(f"🔍 DEBUG: Failed to generate signature: {e}")
-                    logger.error(f"🔍 DEBUG: Message encoding issue: {message.encode('utf-8')}")
-                    raise RobinhoodAPIError(f"Signature generation failed: {e}")
-
-                # Enhanced header logging for debugging
+                        })
+        
+                        # Enhanced header logging for debugging
                 logger.info(f"🔍 DEBUG: === REQUEST HEADERS ===")
                 if auth_method == "private_key":
                     logger.info(f"🔍 DEBUG: x-api-key: {self.api_key[:20]}...")
                     logger.info(f"🔍 DEBUG: x-signature: {signature_b64[:50]}...")
                     logger.info(f"🔍 DEBUG: x-timestamp: {timestamp}")
-                elif auth_method == "oauth":
-                    logger.info(f"🔍 DEBUG: Authorization: Bearer {auth_token[:20]}...")
                 elif auth_method == "public_key":
                     logger.info(f"🔍 DEBUG: x-api-key: {self.api_key[:20]}...")
                     logger.info(f"🔍 DEBUG: Public key authentication (no signature required)")
                 logger.info(f"🔍 DEBUG: Full URL: {url}")
                 logger.info(f"🔍 DEBUG: Method: {method}")
                 logger.info(f"🔍 DEBUG: Request ID: {request_id}")
+                
                 async with self._session.request(
                     method=method,
                     url=url,

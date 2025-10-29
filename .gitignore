@@ -297,3 +297,6 @@ performance_*.json
 
 # Flipping_Coins subdirectory (already has its own .git)
 Flipping_Coins/.git/
+
+# System diagnosis reports (temporary analysis files)
+SYSTEM_DIAGNOSIS_REPORT.md

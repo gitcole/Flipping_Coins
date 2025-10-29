@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Union, TYPE_CHECKING
 
 import structlog
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from ..exceptions import RobinhoodAPIError
 from .crypto_api import RobinhoodCryptoAPI, CryptoOrderRequest
@@ -33,19 +33,22 @@ class CryptoOrder(BaseModel):
     stop_price: Optional[Union[float, str]] = Field(None, description="Stop price")
     extended_hours: bool = Field(default=False, description="Allow extended hours")
 
-    @validator('side')
+    @field_validator('side')
+    @classmethod
     def validate_side(cls, v):
         if v.lower() not in ['buy', 'sell']:
             raise ValueError('Side must be "buy" or "sell"')
         return v.lower()
 
-    @validator('order_type')
+    @field_validator('order_type')
+    @classmethod
     def validate_order_type(cls, v):
         if v.lower() not in ['market', 'limit', 'stop', 'stop_limit']:
             raise ValueError('Order type must be market, limit, stop, or stop_limit')
         return v.lower()
 
-    @validator('time_in_force')
+    @field_validator('time_in_force')
+    @classmethod
     def validate_time_in_force(cls, v):
         valid_tif = ['gtc', 'gtd', 'ioc', 'fok']
         if v.lower() not in valid_tif:
@@ -95,26 +98,33 @@ class RobinhoodCrypto:
         """Initialize crypto trading module.
 
         Args:
-            client: Robinhood API client instance
+            client: Robinhood API client instance (legacy compatibility)
         """
         self.client = client
         self.logger = structlog.get_logger("robinhood.crypto")
 
-        # Initialize the new crypto API client with proper token from main client
-        # Get token from main client auth or use None if not authenticated yet
-        access_token = None
-        self.logger.info("🔍 DEBUG: Initializing crypto API")
-        if hasattr(client, 'auth') and client.auth.is_authenticated():
+        # Initialize enhanced crypto API directly from .env file
+        # This bypasses the old OAuth authentication system
+        self.logger.info("🔍 DEBUG: Initializing enhanced crypto API from .env file")
+        try:
+            from ...app.orchestrator import EnhancedRobinhoodCryptoAPI
+            self.crypto_api = EnhancedRobinhoodCryptoAPI(config_path=".env")
+            self.logger.info("✅ Enhanced crypto API initialized successfully")
+        except Exception as e:
+            self.logger.warning(f"⚠️  Enhanced crypto API initialization failed: {str(e)}")
+            # Fallback to standard API with signature auth
             try:
-                access_token = client.auth.get_access_token()
-                self.logger.info(f"🔍 DEBUG: Got access token from main client: {access_token[:20]}...")
-            except Exception as e:
-                self.logger.warning("🔍 DEBUG: Could not get access token from main client", error=str(e))
-        else:
-            self.logger.warning("🔍 DEBUG: Main client auth not available or not authenticated")
-
-        self.logger.info(f"🔍 DEBUG: Passing access_token to RobinhoodCryptoAPI: {access_token is not None}")
-        self.crypto_api = RobinhoodCryptoAPI(access_token=access_token)
+                from ...config import get_settings
+                settings = get_settings()
+                if settings.robinhood.api_key and settings.robinhood.private_key:
+                    self.crypto_api = RobinhoodCryptoAPI(settings.robinhood.api_key)
+                    self.logger.info("✅ Standard crypto API initialized with signature auth")
+                else:
+                    self.logger.error("❌ No API credentials available for crypto API")
+                    self.crypto_api = None
+            except Exception as fallback_e:
+                self.logger.error(f"❌ Fallback crypto API initialization failed: {str(fallback_e)}")
+                self.crypto_api = None
 
     async def get_crypto_currencies(self) -> List[Dict]:
         """Get list of supported cryptocurrencies.
@@ -162,6 +172,9 @@ class RobinhoodCrypto:
         Returns:
             Current quote information
         """
+        if self.crypto_api is None:
+            raise RobinhoodAPIError(f"Failed to get quote for {symbol}: crypto API not initialized")
+
         try:
             # Use new crypto API
             quote = await self.crypto_api.get_quote(symbol.upper())
@@ -177,6 +190,9 @@ class RobinhoodCrypto:
             )
         except Exception as e:
             self.logger.error("Failed to get crypto quote", symbol=symbol, error=str(e))
+            if self.crypto_api is None:
+                self.logger.error("Crypto API is not initialized - cannot get quote")
+                raise RobinhoodAPIError(f"Failed to get quote for {symbol}: crypto API not initialized")
             raise RobinhoodAPIError(f"Failed to get quote for {symbol}: {e}")
 
     async def get_crypto_quotes(self, symbols: List[str]) -> List[CryptoQuote]:
@@ -188,6 +204,9 @@ class RobinhoodCrypto:
         Returns:
             List of quote information
         """
+        if self.crypto_api is None:
+            raise RobinhoodAPIError(f"Failed to get quotes for {symbols}: crypto API not initialized")
+
         try:
             # Use new crypto API
             quotes_data = await self.crypto_api.get_quotes([s.upper() for s in symbols])
@@ -255,6 +274,9 @@ class RobinhoodCrypto:
 
         if order.order_type in ['stop', 'stop_limit'] and not order.stop_price:
             raise ValueError("Stop price is required for stop orders")
+
+        if self.crypto_api is None:
+            raise RobinhoodAPIError(f"Failed to place order for {order.symbol}: crypto API not initialized")
 
         try:
             # Use new crypto API
@@ -389,6 +411,9 @@ class RobinhoodCrypto:
         Returns:
             List of crypto orders
         """
+        if self.crypto_api is None:
+            raise RobinhoodAPIError(f"Failed to get crypto orders: crypto API not initialized")
+
         try:
             orders = await self.crypto_api.get_orders(symbol.upper() if symbol else None)
             # Return in legacy format for backward compatibility
@@ -406,6 +431,9 @@ class RobinhoodCrypto:
         Returns:
             Order information
         """
+        if self.crypto_api is None:
+            raise RobinhoodAPIError(f"Failed to get order {order_id}: crypto API not initialized")
+
         try:
             order = await self.crypto_api.get_order(order_id)
             return order
@@ -422,6 +450,9 @@ class RobinhoodCrypto:
         Returns:
             Cancellation confirmation
         """
+        if self.crypto_api is None:
+            raise RobinhoodAPIError(f"Failed to cancel order {order_id}: crypto API not initialized")
+
         try:
             result = await self.crypto_api.cancel_order(order_id)
             self.logger.info("Cancelled crypto order", order_id=order_id)
@@ -436,6 +467,9 @@ class RobinhoodCrypto:
         Returns:
             List of crypto positions
         """
+        if self.crypto_api is None:
+            raise RobinhoodAPIError(f"Failed to get crypto positions: crypto API not initialized")
+
         try:
             # Use new crypto API
             positions_data = await self.crypto_api.get_positions()
@@ -479,6 +513,9 @@ class RobinhoodCrypto:
         Returns:
             Crypto account information
         """
+        if self.crypto_api is None:
+            raise RobinhoodAPIError(f"Failed to get crypto account info: crypto API not initialized")
+
         try:
             # Use new crypto API
             account = await self.crypto_api.get_account()
@@ -547,6 +584,9 @@ class RobinhoodCrypto:
         Raises:
             RobinhoodAPIError: If no crypto account found
         """
+        if self.crypto_api is None:
+            raise RobinhoodAPIError(f"Failed to get crypto account ID: crypto API not initialized")
+
         try:
             # Use new crypto API to get account
             account = await self.crypto_api.get_account()
